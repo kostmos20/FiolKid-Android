@@ -12,6 +12,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -38,7 +44,7 @@ private val Gray = Color(0xFFB2B5C1)
  * работает), логотип, название, описание и строка состояния.
  */
 @Composable
-fun ServiceCard(service: Service, look: Look, modifier: Modifier = Modifier) {
+fun ServiceCard(service: Service, look: Look, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
     val working = look == Look.Working
     val logoColor by animateColorAsState(if (look == Look.Off || look == Look.Soon) Gray else service.accent, tween(500), label = "logo")
     val (status, statusColor) = when (look) {
@@ -47,6 +53,7 @@ fun ServiceCard(service: Service, look: Look, modifier: Modifier = Modifier) {
         Look.Working -> "Работает" to Color(0xFFB6CFB9)
         Look.NotWorking -> "Не работает" to Color(0xFFE39A8E)
         Look.NeedsKey -> "Нужен ключ" to Color(0xFFD9C28E)
+        Look.NeedsConnect -> "Нужно подключить" to Color(0xFFD9C28E)
         Look.Soon -> "Скоро" to Color(0xFF9296A0)
     }
 
@@ -73,13 +80,32 @@ fun ServiceCard(service: Service, look: Look, modifier: Modifier = Modifier) {
                 style = TextStyle(color = Color(0xFFC4C4CC), fontSize = 11.us),
                 maxLines = 1,
             )
-            Row(Modifier.padding(top = 15.u), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(5.u).background(statusColor, CircleShape))
-                Spacer(Modifier.width(6.u))
-                BasicText(
-                    status,
-                    style = TextStyle(color = if (look == Look.Off || look == Look.Soon) Color(0xFFC8C8D0) else statusColor, fontSize = 12.us),
-                )
+            // Строка состояния; если нужно действие — на её месте кнопка, чтобы карточка не росла
+            if (action == null) {
+                Row(Modifier.padding(top = 15.u), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(5.u).background(statusColor, CircleShape))
+                    Spacer(Modifier.width(6.u))
+                    BasicText(
+                        status,
+                        style = TextStyle(color = if (look == Look.Off || look == Look.Soon) Color(0xFFC8C8D0) else statusColor, fontSize = 12.us),
+                    )
+                }
+            } else {
+                val shape = RoundedCornerShape(9.u)
+                Row(
+                    Modifier.padding(top = 10.u).fillMaxWidth().height(29.u)
+                        .background(Brush.linearGradient(listOf(Color(0xA3645343), Color(0xD9413D39))), shape)
+                        .border(1.dp, Color(0x4FB59462), shape)
+                        .then(Tap(onAction))
+                        .padding(horizontal = 9.u),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        action, Modifier.weight(1f),
+                        style = TextStyle(color = Color(0xFFE7CFAB), fontSize = 12.us, fontWeight = FontWeight.Medium),
+                    )
+                    PathIcon(Icons.Arrow, Color(0xFFE7CFAB), 12.u, stroke = 1.6f)
+                }
             }
         }
     }

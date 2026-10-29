@@ -162,7 +162,7 @@ private fun Connection(state: HomeState, data: AppData) {
                             when (look) {
                                 Look.Working -> Palette.Green
                                 Look.NotWorking -> Palette.Red
-                                Look.Checking, Look.NeedsKey -> Palette.Amber
+                                Look.Checking, Look.NeedsKey, Look.NeedsConnect -> Palette.Amber
                                 else -> Palette.Gray
                             },
                             CircleShape,
@@ -203,11 +203,16 @@ private fun details(state: HomeState, data: AppData): List<Pair<String, Color>> 
             "${service.name}: $look" to when (look) {
                 Look.Working -> Palette.GreenText
                 Look.NotWorking -> Palette.RedText
-                Look.Checking, Look.NeedsKey -> Palette.AmberText
+                Look.Checking, Look.NeedsKey, Look.NeedsConnect -> Palette.AmberText
                 else -> Palette.Muted
             },
         )
     }
+    val tg = data.telegram
+    add(
+        "Прокси Telegram: ${if (tg.running) "работает" else "выключен"}, подключений ${tg.active} (всего ${tg.total})" +
+            (if (tg.connectedOnce) "" else ", в Telegram не добавлен") to Palette.Muted,
+    )
     add(
         "Через обход: ${com.fiolkid.app.engine.formatBytes(data.traffic.session)}, за всё время " +
             com.fiolkid.app.engine.formatBytes(data.traffic.total) to Palette.Muted,

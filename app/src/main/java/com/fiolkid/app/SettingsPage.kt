@@ -60,6 +60,7 @@ fun SettingsPage(state: HomeState, version: String, data: AppData, actions: AppA
         }
 
         Box(Modifier.anchor("strategy")) { StrategyPanel(state, data, actions) }
+        TelegramPanel(state, data, actions)
         Box(Modifier.anchor("look")) { LookPanel(data, actions) }
         ReportPanel(actions)
         Box(Modifier.anchor("about")) { UpdatesPanel(version, data, actions) }
@@ -121,10 +122,35 @@ private fun StrategyPanel(state: HomeState, data: AppData, actions: AppActions) 
     }
 }
 
+/** Telegram — как панель 05 на компьютере: состояние прокси, «Подключить Telegram» и перезапуск. */
+@Composable
+private fun TelegramPanel(state: HomeState, data: AppData, actions: AppActions) {
+    val tg = data.telegram
+    Card {
+        PanelHeader(Icons.Telegram, "Telegram", "Локальный прокси для мессенджера", "02", iconColor = Color(0xFF94C5DF), iconBack = Color(0x107299BC))
+        val look = state.looks.getValue(Service.Telegram)
+        val (text, dot, color) = when {
+            !tg.running -> Triple("Прокси заработает, когда включишь FiolKid", Palette.Gray, Palette.Muted)
+            look == Look.NotWorking -> Triple("Прокси не достаёт до Telegram — попробуй перезапустить", Palette.Red, Palette.RedText)
+            !tg.connectedOnce -> Triple("Прокси работает — осталось добавить его в Telegram", Palette.Amber, Palette.AmberText)
+            else -> Triple("Работает: подключений сейчас ${tg.active}", Palette.Green, Palette.GreenText)
+        }
+        StateLine(text, dot, color, Modifier.padding(top = 10.u))
+        Row(Modifier.padding(top = 14.u), horizontalArrangement = Arrangement.spacedBy(9.u)) {
+            FiolButton("Подключить Telegram", gold = true, onClick = actions.connectTelegram)
+            FiolButton("", icon = Icons.Refresh, enabled = tg.running, onClick = actions.restartTelegram)
+        }
+        Caption(
+            "«Подключить» открывает Telegram, и он предложит добавить прокси — нажми там «Подключить». " +
+                "Прокси работает, пока включён FiolKid. Кнопка со стрелкой перезапускает прокси.",
+        )
+    }
+}
+
 @Composable
 private fun LookPanel(data: AppData, actions: AppActions) {
     Card {
-        PanelHeader(Icons.Snowflake, "Оформление и запуск", "Пусть будет удобно и уютно", "02", bottom = 5.u)
+        PanelHeader(Icons.Snowflake, "Оформление и запуск", "Пусть будет удобно и уютно", "03", bottom = 5.u)
         SwitchRow("Новогоднее оформление", "Снег, гирлянда и таймер", data.options.newYear, Modifier.padding(vertical = 12.u), actions.setNewYear)
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x0BFFFFFF)))
         SwitchRow(
@@ -138,7 +164,7 @@ private fun LookPanel(data: AppData, actions: AppActions) {
 @Composable
 private fun ReportPanel(actions: AppActions) {
     Card {
-        PanelHeader(Icons.Log, "Журнал и отчёты", "Информация для диагностики", "03")
+        PanelHeader(Icons.Log, "Журнал и отчёты", "Информация для диагностики", "04")
         Hint("Журнал хранится в телефоне, последние 500 событий. В отчёт не попадают ключи и ссылки.")
         Row(Modifier.padding(top = 14.u), horizontalArrangement = Arrangement.spacedBy(9.u)) {
             FiolButton("Скопировать отчёт", icon = Icons.Copy, onClick = actions.copyReport)

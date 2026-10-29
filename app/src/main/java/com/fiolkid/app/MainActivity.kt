@@ -20,6 +20,9 @@ import com.fiolkid.app.engine.FiolVpnService
 import com.fiolkid.app.engine.Options
 import com.fiolkid.app.engine.Report
 import com.fiolkid.app.engine.StrategyMode
+import com.fiolkid.app.engine.TelegramProxy
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import com.fiolkid.app.engine.TrafficMeter
 import com.fiolkid.app.engine.Updater
 import kotlinx.coroutines.Job
@@ -57,6 +60,11 @@ class MainActivity : ComponentActivity() {
             setAutostart = { on -> Options.update { it.copy(autostart = on) } },
             checkUpdate = { lifecycleScope.launch { Updater.check(this@MainActivity, BuildConfig.VERSION_NAME) } },
             installUpdate = { lifecycleScope.launch { Updater.install(this@MainActivity) } },
+            connectTelegram = ::connectTelegram,
+            restartTelegram = {
+                showToast("Перезапускаю прокси Telegram…")
+                FiolVpnService.send(this, FiolVpnService.ACTION_RESTART_TELEGRAM)
+            },
         )
         setContent {
             val state by Engine.state.collectAsState()
@@ -68,6 +76,7 @@ class MainActivity : ComponentActivity() {
                 current = Engine.current.collectAsState().value,
                 traffic = TrafficMeter.traffic.collectAsState().value,
                 lastCheck = Engine.lastCheck.collectAsState().value,
+                telegram = TelegramProxy.state.collectAsState().value,
                 toast = toast.collectAsState().value,
             )
             FiolKidApp(state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, data = data, actions = actions)
@@ -102,6 +111,16 @@ class MainActivity : ComponentActivity() {
         if (Engine.state.value.power == Power.On) {
             showToast("Переключаюсь на «$name»…")
             FiolVpnService.send(this, FiolVpnService.ACTION_APPLY, name)
+        }
+    }
+
+    /** Открыть в Telegram ссылку на наш прокси — он сам предложит его добавить. */
+    private fun connectTelegram() {
+        if (Engine.state.value.power == Power.Off) showToast("Сначала включи FiolKid — прокси работает вместе с ним")
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(TelegramProxy.link)))
+        } catch (_: ActivityNotFoundException) {
+            showToast("Telegram не установлен")
         }
     }
 

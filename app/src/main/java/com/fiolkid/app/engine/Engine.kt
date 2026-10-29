@@ -209,10 +209,25 @@ object Engine {
         running = null
     }
 
-    fun connecting() = show(HomeState(Power.Connecting, HomeState.looks(Look.Checking, Look.Checking)))
+    fun connecting() = show(HomeState(Power.Connecting, HomeState.looks(Look.Checking, Look.Checking, Look.Checking)))
 
-    fun on(looks: Map<Service, Look>) =
-        show(HomeState(Power.On, HomeState.looks(looks.getValue(Service.YouTube), looks.getValue(Service.Discord))))
+    fun on(looks: Map<Service, Look>) = show(HomeState(Power.On, HomeState.looks(looks)))
+
+    /** Поменять одну карточку, не трогая остальные (Telegram подключился к прокси). */
+    fun update(service: Service, look: Look) {
+        val state = _state.value
+        if (state.power == Power.On) show(state.copy(looks = state.looks + (service to look)))
+    }
+
+    /** Карточка Telegram: прокси не достаёт до Telegram — не работает; в Telegram ещё не добавлен — «Подключить». */
+    fun telegramLook(): Look {
+        val problem = TelegramProxy.probe()
+        if (problem != null) {
+            note("Не прошло: $problem")
+            return Look.NotWorking
+        }
+        return if (TelegramProxy.state.value.connectedOnce) Look.Working else Look.NeedsConnect
+    }
 
     /** Пока идёт замер — заголовок на главной, как на компьютере. */
     fun measuring(number: Int, count: Int) = show(_state.value.copy(measuring = number to count))

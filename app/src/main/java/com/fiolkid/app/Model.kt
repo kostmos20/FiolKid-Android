@@ -16,8 +16,11 @@ enum class Service(
     Ai("VPN", "Нейросети и другие сайты", R.drawable.card_vpn, Color(0xFFF1D16D)),
 }
 
-/** Как выглядит карточка сервиса. Soon — в версии для телефона ещё не сделано. */
-enum class Look { Off, Checking, Working, NotWorking, NeedsKey, Soon }
+/**
+ * Как выглядит карточка сервиса. NeedsConnect — прокси Telegram работает, но в Telegram его ещё не добавили;
+ * Soon — в версии для телефона ещё не сделано.
+ */
+enum class Look { Off, Checking, Working, NotWorking, NeedsKey, NeedsConnect, Soon }
 
 enum class Power { Off, Connecting, On }
 
@@ -29,12 +32,14 @@ data class HomeState(
     val measuring: Pair<Int, Int>? = null,
 ) {
     companion object {
-        /** Пока на телефоне работают только YouTube и Discord. */
-        fun looks(youTube: Look, discord: Look) =
-            mapOf(Service.YouTube to youTube, Service.Discord to discord, Service.Telegram to Look.Soon, Service.Ai to Look.Soon)
+        /** Карточки по результатам проверки; чего нет в [known] (нейросети на телефоне пока) — «Скоро». */
+        fun looks(known: Map<Service, Look>) = Service.entries.associateWith { known[it] ?: Look.Soon }
+
+        fun looks(youTube: Look, discord: Look, telegram: Look = Look.Soon) =
+            looks(mapOf(Service.YouTube to youTube, Service.Discord to discord, Service.Telegram to telegram))
     }
 
-    private val problems get() = looks.values.count { it == Look.NotWorking || it == Look.NeedsKey }
+    private val problems get() = looks.values.count { it == Look.NotWorking || it == Look.NeedsKey || it == Look.NeedsConnect }
     private val checking get() = looks.values.any { it == Look.Checking }
 
     val headline: Pair<String, String>
@@ -45,6 +50,8 @@ data class HomeState(
             power == Power.Connecting -> "Подключаем…" to "Обычно это занимает несколько секунд."
             checking -> "Проверяю…" to "Сейчас всё проверю"
             problems == 0 -> "Всё работает" to "Можно пользоваться привычными сервисами."
+            problems == 1 && looks[Service.Telegram] == Look.NeedsConnect ->
+                "Почти всё работает" to "Осталось подключить Telegram — нажми «Подключить»"
             else -> "Почти всё работает" to "Если не наладится само — открой «Журнал» и пришли отчёт"
         }
 

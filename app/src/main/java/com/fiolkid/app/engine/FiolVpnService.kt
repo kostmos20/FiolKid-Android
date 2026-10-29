@@ -7,6 +7,8 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.ServiceCompat
+import com.fiolkid.app.Look
+import com.fiolkid.app.Service
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,6 +36,7 @@ class FiolVpnService : VpnService() {
         const val ACTION_CHECK = "com.fiolkid.app.CHECK"
         const val ACTION_BENCHMARK = "com.fiolkid.app.BENCHMARK"
         const val ACTION_APPLY = "com.fiolkid.app.APPLY"
+        const val ACTION_RESTART_TELEGRAM = "com.fiolkid.app.RESTART_TELEGRAM"
         const val EXTRA_STRATEGY = "strategy"
 
         /** Проверка, пока включено, — раз в 5 минут; после двух неудач подряд подбираем способ заново. */
@@ -61,6 +64,7 @@ class FiolVpnService : VpnService() {
                         ACTION_CHECK -> recheck(byUser = true)
                         ACTION_BENCHMARK -> benchmark()
                         ACTION_APPLY -> apply(strategy)
+                        ACTION_RESTART_TELEGRAM -> restartTelegram()
                         // Без действия запускает сама система: «Постоянная VPN» в настройках телефона
                         else -> start()
                     }
@@ -142,7 +146,8 @@ class FiolVpnService : VpnService() {
             stop()
             return
         }
-        Engine.on(result.looks)
+        startTelegram()
+        Engine.on(result.looks + (Service.Telegram to Engine.telegramLook()))
         if (result.allPassed) Engine.note("Все проверки прошли")
         failures = 0
         watchTraffic()
@@ -182,7 +187,7 @@ class FiolVpnService : VpnService() {
         }
         if (byUser) Engine.note("Проверяю по просьбе")
         val result = Engine.check()
-        Engine.on(result.looks)
+        Engine.on(result.looks + (Service.Telegram to Engine.telegramLook()))
         if (result.allPassed) {
             failures = 0
             Engine.note("Все проверки прошли")
@@ -196,7 +201,25 @@ class FiolVpnService : VpnService() {
         Engine.connecting()
         val picked = Engine.pickStrategy() ?: return stop()
         Engine.note("Работаю со способом «${picked.first.name}»")
-        Engine.on(picked.second.looks)
+        Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
+    }
+
+    /** Прокси Telegram работает, пока включён FiolKid; первое подключение Telegram сразу зажигает карточку. */
+    private fun startTelegram() {
+        TelegramProxy.onFirstClient = { Engine.update(Service.Telegram, Look.Working) }
+        try {
+            TelegramProxy.start()
+        } catch (e: Exception) {
+            Engine.note("Прокси Telegram не запустился: ${e.message}")
+        }
+    }
+
+    private fun restartTelegram() {
+        if (tun == null) return
+        Engine.note("Перезапускаю прокси Telegram по просьбе")
+        TelegramProxy.stop()
+        startTelegram()
+        Engine.update(Service.Telegram, Engine.telegramLook())
     }
 
     private fun benchmark() {
@@ -211,15 +234,16 @@ class FiolVpnService : VpnService() {
         }
         if (picked == null) return stop()
         Engine.note("Работаю со способом «${picked.first.name}»")
-        Engine.on(picked.second.looks)
+        Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
     }
 
     private fun apply(name: String?) {
         val strategy = Strategies.all.firstOrNull { it.name == name } ?: return
         if (tun == null) return
+        val telegram = Engine.state.value.looks.getValue(Service.Telegram)
         Engine.connecting()
         val result = Engine.apply(strategy) ?: return stop()
-        Engine.on(result.looks)
+        Engine.on(result.looks + (Service.Telegram to telegram))
     }
 
     private fun stop() {
@@ -227,6 +251,7 @@ class FiolVpnService : VpnService() {
         meter = null
         watchdog?.cancel()
         watchdog = null
+        TelegramProxy.stop()
         if (tun != null) {
             runCatching { TrafficMeter.update(this, Tunnel.TProxyGetStats()) }
             runCatching { Tunnel.TProxyStopService() }

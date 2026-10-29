@@ -3,6 +3,7 @@ package com.fiolkid.app
 import com.fiolkid.app.engine.OptionsState
 import com.fiolkid.app.engine.StrategyMode
 import com.fiolkid.app.engine.StrategyResult
+import com.fiolkid.app.engine.TelegramState
 import com.fiolkid.app.engine.Traffic
 import com.fiolkid.app.engine.UpdateState
 import java.time.LocalDateTime
@@ -16,6 +17,7 @@ data class AppData(
     val current: String? = null,
     val traffic: Traffic = Traffic(),
     val lastCheck: LocalDateTime? = null,
+    val telegram: TelegramState = TelegramState(),
     /** Всплывающая подсказка снизу («Отчёт скопирован» и т. п.). */
     val toast: String? = null,
 )
@@ -32,4 +34,6 @@ class AppActions(
     val setAutostart: (Boolean) -> Unit = {},
     val checkUpdate: () -> Unit = {},
     val installUpdate: () -> Unit = {},
+    val connectTelegram: () -> Unit = {},
+    val restartTelegram: () -> Unit = {},
 )

@@ -18,7 +18,7 @@ class ScreenshotTest {
     val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5, theme = "android:Theme.Material.NoActionBar")
 
     private val now = LocalDateTime.of(2026, 10, 29, 12, 0, 0)
-    private val working = HomeState(Power.On, HomeState.looks(Look.Working, Look.Working))
+    private val working = HomeState(Power.On, HomeState.looks(Look.Working, Look.Working, Look.Working))
 
     internal val sample = AppData(
         log = listOf(
@@ -38,44 +38,45 @@ class ScreenshotTest {
             "FAKE TTL" to StrategyResult(0, 4, 7.1),
         ),
         current = "SPLIT DISORDER",
+        telegram = com.fiolkid.app.engine.TelegramState(running = true, active = 6, total = 41, connectedOnce = true),
         traffic = Traffic(152L * 1024 * 1024, 1288L * 1024 * 1024),
         lastCheck = now,
     )
 
     @Test
-    fun off() = paparazzi.snapshot { FiolKidApp(HomeState(), "0.3.0", {}, time = 3f, now = now) }
+    fun off() = paparazzi.snapshot { FiolKidApp(HomeState(), "0.4.0", {}, time = 3f, now = now) }
 
     @Test
-    fun on() = paparazzi.snapshot { FiolKidApp(working, "0.3.0", {}, time = 3f, now = now) }
+    fun on() = paparazzi.snapshot { FiolKidApp(working, "0.4.0", {}, time = 3f, now = now) }
 
     @Test
     fun mixed() = paparazzi.snapshot {
-        val looks = mapOf(Service.YouTube to Look.Working, Service.Discord to Look.NotWorking, Service.Telegram to Look.Soon, Service.Ai to Look.Soon)
-        FiolKidApp(HomeState(Power.On, looks), "0.3.0", {}, time = 3f, now = now)
+        val looks = HomeState.looks(Look.Working, Look.Working, Look.NeedsConnect)
+        FiolKidApp(HomeState(Power.On, looks), "0.4.0", {}, time = 3f, now = now)
     }
 
     @Test
     fun updateLink() = paparazzi.snapshot {
-        FiolKidApp(HomeState(), "0.3.0", {}, time = 3f, now = now, data = AppData(update = UpdateState("Вышла версия 0.4.0", Release("0.4.0", "", ""))))
+        FiolKidApp(HomeState(), "0.4.0", {}, time = 3f, now = now, data = AppData(update = UpdateState("Вышла версия 0.4.0", Release("0.4.0", "", ""))))
     }
 
     @Test
     fun noNewYear() = paparazzi.snapshot {
-        FiolKidApp(working, "0.3.0", {}, time = 3f, now = now, data = AppData(options = OptionsState(newYear = false)))
+        FiolKidApp(working, "0.4.0", {}, time = 3f, now = now, data = AppData(options = OptionsState(newYear = false)))
     }
 
     @Test
-    fun log() = paparazzi.snapshot { FiolKidApp(working, "0.3.0", {}, time = 3f, now = now, initialTab = Tab.Log, data = sample) }
+    fun log() = paparazzi.snapshot { FiolKidApp(working, "0.4.0", {}, time = 3f, now = now, initialTab = Tab.Log, data = sample) }
 
     @Test
     fun settings() = paparazzi.snapshot {
-        FiolKidApp(working, "0.3.0", {}, time = 3f, now = now, initialTab = Tab.Settings, data = sample)
+        FiolKidApp(working, "0.4.0", {}, time = 3f, now = now, initialTab = Tab.Settings, data = sample)
     }
 
     @Test
     fun settingsManual() = paparazzi.snapshot {
         val data = sample.copy(options = OptionsState(mode = StrategyMode.Manual, manual = "DISORDER TLSREC"), toast = "Отчёт скопирован — вставь его в сообщение")
-        FiolKidApp(working, "0.3.0", {}, time = 3f, now = now, initialTab = Tab.Settings, data = data)
+        FiolKidApp(working, "0.4.0", {}, time = 3f, now = now, initialTab = Tab.Settings, data = data)
     }
 }
 
@@ -90,6 +91,6 @@ class TallScreenshotTest {
             "\n\n### Как установить\n…"
         val base = ScreenshotTest().sample
         val data = base.copy(update = UpdateState("Вышла версия 0.3.2", Release("0.3.2", "", notes)))
-        FiolKidApp(HomeState(Power.On, HomeState.looks(Look.Working, Look.Working)), "0.3.1", {}, time = 3f, initialTab = Tab.Settings, data = data)
+        FiolKidApp(HomeState(Power.On, HomeState.looks(Look.Working, Look.Working, Look.Working)), "0.3.1", {}, time = 3f, initialTab = Tab.Settings, data = data)
     }
 }

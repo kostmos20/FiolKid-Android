@@ -73,6 +73,7 @@ object Icons {
     const val Snowflake = "M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7M9 4l3 3 3-3M9 20l3-3 3 3M3 10l4-1-1-4m12 14-1-4 4-1M6 19l1-4-4-1m18-4-4-1 1-4"
     const val Key = "M13 9a5 5 0 1 1-10 0a5 5 0 1 1 10 0ZM12 13l8 8m-4-4 3-3m-6 0 3-3"
     const val Arrow = "m9 5 7 7-7 7"
+    const val Telegram = "m3 14 26-10-6 25-9-8-6 4 2-8zm7 3L24 9 14 21"
 }
 
 /** Значок-контур из строки SVG, растянутый по размеру значка (как Stretch=Uniform); толщина — в единицах экрана. */
@@ -202,8 +203,9 @@ fun FiolButton(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        if (icon != null) PathIcon(icon, content, 14.u, stroke = 1.7f, Modifier.padding(end = 8.u))
-        BasicText(text, style = TextStyle(color = content, fontSize = 13.us, fontWeight = FontWeight.Medium), maxLines = 1)
+        if (icon != null) PathIcon(icon, content, 14.u, stroke = 1.7f, if (text.isEmpty()) Modifier else Modifier.padding(end = 8.u))
+        if (text.isNotEmpty())
+            BasicText(text, style = TextStyle(color = content, fontSize = 13.us, fontWeight = FontWeight.Medium), maxLines = 1)
     }
 }
 

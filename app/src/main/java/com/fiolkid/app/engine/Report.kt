@@ -25,6 +25,11 @@ object Report {
                     " (${modeName(options.mode)})",
             )
             Service.entries.forEach { appendLine("${it.name}: ${state.looks[it]}") }
+            val tg = TelegramProxy.state.value
+            appendLine(
+                "Прокси Telegram: ${if (tg.running) "работает" else "выключен"}; подключений сейчас ${tg.active}, " +
+                    "всего ${tg.total}; в Telegram ${if (tg.connectedOnce) "добавлен" else "не добавлен"}",
+            )
             appendLine("Через обход: ${formatBytes(traffic.session)} за это включение, ${formatBytes(traffic.total)} за всё время")
             appendLine("Новогоднее оформление: ${yes(options.newYear)}; запуск вместе с телефоном: ${yes(options.autostart)}")
             val results = Engine.results.value

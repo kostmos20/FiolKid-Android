@@ -174,7 +174,7 @@ private fun HomePage(state: HomeState, onPower: () -> Unit, fixedNow: LocalDateT
         PowerButton(state, onPower)
 
         Spacer(Modifier.weight(0.9f))
-        Services(state)
+        Services(state, actions)
         Spacer(Modifier.weight(1f))
 
         // Тихая строка внизу; если вышло обновление — на её месте ссылка «Обновить», как на компьютере
@@ -257,7 +257,7 @@ private fun blink(): Float {
 }
 
 @Composable
-private fun Services(state: HomeState) {
+private fun Services(state: HomeState, actions: AppActions) {
     Column(Modifier.width(452.u)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 1.u), verticalAlignment = Alignment.CenterVertically) {
             BasicText(
@@ -271,7 +271,17 @@ private fun Services(state: HomeState) {
         rows.forEachIndexed { index, pair ->
             if (index > 0) Spacer(Modifier.height(28.u))
             Row(horizontalArrangement = Arrangement.spacedBy(16.u)) {
-                pair.forEach { ServiceCard(it, state.looks.getValue(it), Modifier.size(218.u, 132.u)) }
+                pair.forEach { service ->
+                    val look = state.looks.getValue(service)
+                    // Как на компьютере: Telegram не добавил прокси — «Подключить», прокси не работает — «Перезапустить»
+                    val (action, onAction) = when {
+                        service != Service.Telegram -> null to {}
+                        look == Look.NeedsConnect -> "Подключить" to actions.connectTelegram
+                        look == Look.NotWorking -> "Перезапустить" to actions.restartTelegram
+                        else -> null to {}
+                    }
+                    ServiceCard(service, look, Modifier.size(218.u, 132.u), action, onAction)
+                }
             }
         }
     }
