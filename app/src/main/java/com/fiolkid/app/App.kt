@@ -19,7 +19,7 @@ class App : Application() {
         Engine.init(this)
         TrafficMeter.load(this)
         TelegramProxy.load(this)
-        Updater.noteVersion(this, BuildConfig.VERSION_NAME)
+        Engine.noteUnexpectedClose(updated = Updater.noteVersion(this, BuildConfig.VERSION_NAME))
         val crash = File(filesDir, "crash.txt")
         if (crash.exists()) {
             Engine.note("Прошлый раз программа упала:")

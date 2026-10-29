@@ -44,14 +44,15 @@ object Updater {
         private set
 
     /** При запуске: если версия сменилась с прошлого раза — значит, обновились. */
-    fun noteVersion(context: Context, current: String) {
+    /** Запомнить версию; true — программа только что обновилась. */
+    fun noteVersion(context: Context, current: String): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val previous = prefs.getString(KEY_VERSION, null)
-        if (previous != null && previous != current) {
-            Engine.note("Обновлено: $previous → $current")
-            justUpdated = current
-        }
         prefs.edit().putString(KEY_VERSION, current).apply()
+        if (previous == null || previous == current) return false
+        Engine.note("Обновлено: $previous → $current")
+        justUpdated = current
+        return true
     }
 
     fun forgetJustUpdated() {

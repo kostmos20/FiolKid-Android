@@ -69,10 +69,16 @@ object Engine {
         if (file.exists())
             _log.value = file.readLines().takeLast(MAX_LOG)
         note("Программа запущена ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}")
-        prefs.getString(KEY_STEP, null)?.let {
-            note("Прошлый раз программа закрылась сама, не выключившись (шаг: $it) — её мог остановить телефон или сбой")
-            step(null)
-        }
+    }
+
+    /**
+     * Если прошлый раз служба умерла, не выключившись, — сказать, на каком шаге. После обновления молчим:
+     * старую версию закрыл установщик, это не сбой.
+     */
+    fun noteUnexpectedClose(updated: Boolean) {
+        val step = prefs.getString(KEY_STEP, null) ?: return
+        if (!updated) note("Прошлый раз программа закрылась сама, не выключившись (шаг: $step) — её мог остановить телефон или сбой")
+        step(null)
     }
 
     /**
@@ -115,7 +121,12 @@ object Engine {
         val result = Checks.run(PORT)
         _lastCheck.value = LocalDateTime.now()
         remember(strategy, StrategyResult(result.passed, result.total, result.seconds))
-        note("Способ «${strategy.name}»: открылось ${result.passed} из ${result.total}, ${"%.1f".format(Locale.forLanguageTag("ru"), result.seconds)} с")
+        // Какие именно адреса не открылись — по ним видно, что режет провайдер
+        val failed = result.problems.values.flatten().map { it.substringBefore(':') }
+        note(
+            "Способ «${strategy.name}»: открылось ${result.passed} из ${result.total}, ${"%.1f".format(Locale.forLanguageTag("ru"), result.seconds)} с" +
+                if (failed.isEmpty()) "" else " (не открылись: ${failed.joinToString()})",
+        )
         return result
     }
 

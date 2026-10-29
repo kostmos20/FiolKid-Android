@@ -10,8 +10,8 @@ data class Strategy(val name: String, val args: String)
 object Strategies {
     private const val Udp = "-Ku -a1 -An -Kt,h"
 
-    val all = listOf(
-        Strategy("SPLIT DISORDER", "-s1 -d1 -r1+s -At,r,s -s1 -d1 -s5+s -s10+s -s15+s -s20+s -r1+s"),
+    /** Остальные способы — после основного и сильных под Дом.ру (как ALT4 и ALT9 на компьютере), чтобы тех не ждать. */
+    private val base = listOf(
         Strategy("DISORDER TLSREC", "-d1 -r1+s -At,r,s -d1 -f-1 -t8"),
         Strategy("OOB", "-o1 -d1 -r1+s -At,r,s -o2 -s1+s -d3+s"),
         Strategy("FAKE TTL", "-f-1 -t6 -r1+s -At,r,s -d1+s -f-1 -t8"),
@@ -25,6 +25,18 @@ object Strategies {
         Strategy("TLSREC MULTI", "-r1+s -r3+s -d1 -s5+s -At,r,s -d1+s -f-1 -t8"),
         Strategy("OOB SNI", "-o1+s -d1 -s1+sm -r1+s -At,r,s -q1 -d3+s"),
     )
+
+    val all = listOf(Strategy("SPLIT DISORDER", "-s1 -d1 -r1+s -At,r,s -s1 -d1 -s5+s -s10+s -s15+s -s20+s -r1+s")) +
+        listOf(2, 3, 4, 5).map { ttl ->
+            // Как ALT4 на компьютере: поддельный ClientHello Google и разрезы. Там подделку портит неверный номер
+            // пакета, на телефоне без root так нельзя — только малый TTL: до провайдера доходит, до сервера нет
+            Strategy("ALT4 TTL$ttl", "-f-1 -t$ttl -n www.google.com -s1 -s3+s -s5+s -At,r,s -s1 -d1 -s5+s -r1+s")
+        } +
+        listOf(3, 4).map { ttl ->
+            // Как ALT9: подделка имени сайта (www.google.com) вокруг настоящего, тоже на малом TTL
+            Strategy("ALT9 TTL$ttl", "-f1+s -t$ttl -n www.google.com -d1+sm -s3+s -At,r,s -s1 -d1 -s5+s -r1+s")
+        } +
+        base
 
     /**
      * Полные аргументы byedpi: только на 127.0.0.1 — чтобы прокси не был виден другим устройствам в сети.
