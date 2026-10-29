@@ -1,6 +1,10 @@
 package com.fiolkid.app
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -72,9 +76,10 @@ fun FiolKidApp(
     time: Float = animationTime(),
     now: LocalDateTime? = null,
     initialTab: Tab = Tab.Home,
-    log: List<String> = emptyList(),
-    update: UpdateUi? = null,
+    data: AppData = AppData(),
+    actions: AppActions = AppActions(),
 ) {
+    val newYear = data.options.newYear
     var tab by remember { mutableStateOf(initialTab) }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF18191F))) {
         val unit = maxWidth.value / 500f
@@ -102,20 +107,22 @@ fun FiolKidApp(
             Column(Modifier.fillMaxSize()) {
                 Header(version)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    Garland(
-                        time, unit, dim = if (tab == Tab.Home) 1f else 0.4f,
-                        modifier = Modifier.padding(start = 16.u, end = 16.u, top = 2.u).fillMaxWidth().height(34.u),
-                    )
+                    if (newYear)
+                        Garland(
+                            time, unit, dim = if (tab == Tab.Home) 1f else 0.4f,
+                            modifier = Modifier.padding(start = 16.u, end = 16.u, top = 2.u).fillMaxWidth().height(34.u),
+                        )
                     when (tab) {
-                        Tab.Home -> HomePage(state, onPower, now, update)
-                        Tab.Log -> LogPage(log)
-                        Tab.Settings -> SettingsPage(version, update)
+                        Tab.Home -> HomePage(state, onPower, now, data, actions)
+                        Tab.Log -> LogPage(state, data, actions)
+                        Tab.Settings -> SettingsPage(state, version, data, actions)
                     }
+                    Toast(data.toast)
                 }
-                NavBar(tab) { tab = it }
+                NavBar(tab, newYear) { tab = it }
             }
 
-            if (tab == Tab.Home)
+            if (tab == Tab.Home && newYear)
                 Snow(time, unit, Modifier.fillMaxSize())
         }
     }
@@ -140,10 +147,11 @@ private fun Header(version: String) {
 }
 
 @Composable
-private fun HomePage(state: HomeState, onPower: () -> Unit, fixedNow: LocalDateTime?, update: UpdateUi?) {
+private fun HomePage(state: HomeState, onPower: () -> Unit, fixedNow: LocalDateTime?, data: AppData, actions: AppActions) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(43.u))
-        Countdown(fixedNow)
+        // Новогоднее: таймер до Нового года (без него — пустое место той же высоты)
+        if (data.options.newYear) Countdown(fixedNow) else Spacer(Modifier.height(30.u))
         Spacer(Modifier.weight(1f))
 
         // Главное состояние и кнопка
@@ -170,11 +178,11 @@ private fun HomePage(state: HomeState, onPower: () -> Unit, fixedNow: LocalDateT
         Spacer(Modifier.weight(1f))
 
         // Тихая строка внизу; если вышло обновление — на её месте ссылка «Обновить», как на компьютере
-        val available = update?.state?.available
-        if (update != null && available != null) {
+        val available = data.update.available
+        if (available != null) {
             BasicText(
-                if (update.state.busy) update.state.status else "Вышла версия ${available.version} — обновить",
-                Modifier.clickable(remember { MutableInteractionSource() }, null, onClick = update.onInstall),
+                if (data.update.busy) data.update.status else "Вышла версия ${available.version} — обновить",
+                Modifier.clickable(remember { MutableInteractionSource() }, null, onClick = actions.installUpdate),
                 style = TextStyle(
                     color = WinterColors.Warm, fontSize = 11.5.us, fontWeight = FontWeight.SemiBold,
                     textDecoration = TextDecoration.Underline,
@@ -269,30 +277,9 @@ private fun Services(state: HomeState) {
     }
 }
 
-/** Журнал пока простым списком: полный вид, как на компьютере, — позже. */
-@Composable
-private fun LogPage(log: List<String>) {
-    Column(Modifier.fillMaxSize().padding(top = 60.u, start = 24.u, end = 24.u)) {
-        BasicText("Журнал", style = TextStyle(color = WinterColors.Text, fontSize = 30.us, fontWeight = FontWeight.SemiBold))
-        Column(
-            Modifier.padding(top = 14.u).fillMaxWidth().weight(1f)
-                .background(Color(0x66111620), RoundedCornerShape(16.u))
-                .padding(14.u)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            if (log.isEmpty())
-                BasicText("Событий пока нет — нажми «Включить» на главной.", style = TextStyle(color = Color(0xFFC0C0CA), fontSize = 13.us))
-            log.forEach {
-                BasicText(it, Modifier.padding(bottom = 6.u), style = TextStyle(color = Color(0xFFDCD8D2), fontSize = 12.us))
-            }
-        }
-        Spacer(Modifier.height(16.u))
-    }
-}
-
 /** Вкладки: тёмная панель со снежной шапкой сверху, у выбранной — тёплый цвет и чёрточка снизу. */
 @Composable
-private fun NavBar(tab: Tab, onTab: (Tab) -> Unit) {
+private fun NavBar(tab: Tab, newYear: Boolean, onTab: (Tab) -> Unit) {
     Box(
         Modifier.fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color(0xFF242630), Color(0xFF191C25))))
@@ -300,10 +287,11 @@ private fun NavBar(tab: Tab, onTab: (Tab) -> Unit) {
             .navigationBarsPadding(),
     ) {
         Box(Modifier.fillMaxWidth().height(83.u)) {
-            Image(
-                painterResource(R.drawable.snow_cap), null, contentScale = ContentScale.FillBounds,
-                modifier = Modifier.bleed(510.u, 93.5.u, (-5).u, (-36).u),
-            )
+            if (newYear)
+                Image(
+                    painterResource(R.drawable.snow_cap), null, contentScale = ContentScale.FillBounds,
+                    modifier = Modifier.bleed(510.u, 93.5.u, (-5).u, (-36).u),
+                )
             Row(
                 Modifier.fillMaxWidth().padding(start = 24.u, end = 24.u, top = 9.u).align(Alignment.Center),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -343,21 +331,22 @@ private fun TabButton(label: String, icon: String, selected: Boolean, onClick: (
     }
 }
 
-/** Значок-контур из строки SVG, растянутый по размеру значка (как Stretch=Uniform); толщина — в единицах экрана. */
+/** Всплывающая подсказка снизу («Отчёт скопирован» и т. п.), как на компьютере. */
 @Composable
-private fun PathIcon(data: String, color: Color, size: Dp, stroke: Float) {
-    val path = remember(data) { svg(data) }
-    val unit = LocalUnit.current
-    Canvas(Modifier.size(size)) {
-        val bounds = path.getBounds()
-        val width = stroke * unit * density
-        val k = minOf((this.size.width - width) / bounds.width, (this.size.height - width) / bounds.height)
-        val dx = (this.size.width - bounds.width * k) / 2 - bounds.left * k
-        val dy = (this.size.height - bounds.height * k) / 2 - bounds.top * k
-        translate(dx, dy) {
-            scale(k, pivot = Offset.Zero) {
-                drawPath(path, color, style = Stroke(width / k, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
+private fun BoxScope.Toast(text: String?) {
+    AnimatedVisibility(
+        text != null, Modifier.align(Alignment.BottomCenter).padding(start = 22.u, end = 22.u, bottom = 24.u),
+        enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut(),
+    ) {
+        val shape = RoundedCornerShape(12.u)
+        Box(
+            Modifier.background(Color(0xF535343E), shape).border(1.dp, Color(0x18FFFFFF), shape)
+                .padding(horizontal = 16.u, vertical = 13.u),
+        ) {
+            BasicText(
+                text.orEmpty(),
+                style = TextStyle(color = WinterColors.Text, fontSize = 13.us, textAlign = TextAlign.Center),
+            )
         }
     }
 }

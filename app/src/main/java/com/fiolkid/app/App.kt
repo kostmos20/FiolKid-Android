@@ -2,6 +2,7 @@ package com.fiolkid.app
 
 import android.app.Application
 import com.fiolkid.app.engine.Engine
+import com.fiolkid.app.engine.Options
 import com.fiolkid.app.engine.TrafficMeter
 import java.io.File
 
@@ -12,6 +13,8 @@ import java.io.File
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        Options.load(this)
+        Engine.init(this)
         TrafficMeter.load(this)
         val crash = File(filesDir, "crash.txt")
         if (crash.exists()) {

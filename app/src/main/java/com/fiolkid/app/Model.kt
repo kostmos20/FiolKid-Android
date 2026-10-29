@@ -25,6 +25,8 @@ enum class Power { Off, Connecting, On }
 data class HomeState(
     val power: Power = Power.Off,
     val looks: Map<Service, Look> = Service.entries.associateWith { Look.Off },
+    /** Идёт замер способов: какой по счёту из скольких. */
+    val measuring: Pair<Int, Int>? = null,
 ) {
     companion object {
         /** Пока на телефоне работают только YouTube и Discord. */
@@ -37,6 +39,8 @@ data class HomeState(
 
     val headline: Pair<String, String>
         get() = when {
+            measuring != null ->
+                "Замеряю скорость…" to "Пробую способ ${measuring.first} из ${measuring.second}, пару минут видео может подтормаживать"
             power == Power.Off -> "Выключено" to "Нажми на кнопку, чтобы включить FiolKid."
             power == Power.Connecting -> "Подключаем…" to "Обычно это занимает несколько секунд."
             checking -> "Проверяю…" to "Сейчас всё проверю"

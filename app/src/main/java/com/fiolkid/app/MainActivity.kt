@@ -1,10 +1,12 @@
 package com.fiolkid.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,34 +14,63 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.lifecycleScope
 import com.fiolkid.app.engine.Engine
 import com.fiolkid.app.engine.FiolVpnService
+import com.fiolkid.app.engine.Options
+import com.fiolkid.app.engine.Report
+import com.fiolkid.app.engine.StrategyMode
+import com.fiolkid.app.engine.TrafficMeter
 import com.fiolkid.app.engine.Updater
-import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     // Android один раз спрашивает «Разрешить FiolKid создать VPN-подключение?»
     private val askVpn = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK) send(FiolVpnService.ACTION_START)
+        if (result.resultCode == RESULT_OK) FiolVpnService.send(this, FiolVpnService.ACTION_START)
         else Engine.note("VPN не разрешён — без него обход не работает")
     }
+
+    private val toast = MutableStateFlow<String?>(null)
+    private var toastJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val actions = AppActions(
+            check = {
+                if (Engine.state.value.power == Power.Off) showToast("Сначала включи FiolKid на главной")
+                else {
+                    showToast("Проверяю…")
+                    FiolVpnService.send(this, FiolVpnService.ACTION_CHECK)
+                }
+            },
+            copyReport = ::copyReport,
+            shareReport = ::shareReport,
+            setMode = { mode -> Options.update { it.copy(mode = mode) } },
+            pickStrategy = ::pickStrategy,
+            benchmark = { FiolVpnService.send(this, FiolVpnService.ACTION_BENCHMARK) },
+            setNewYear = { on -> Options.update { it.copy(newYear = on) } },
+            setAutostart = { on -> Options.update { it.copy(autostart = on) } },
+            checkUpdate = { lifecycleScope.launch { Updater.check(this@MainActivity, BuildConfig.VERSION_NAME) } },
+            installUpdate = { lifecycleScope.launch { Updater.install(this@MainActivity) } },
+        )
         setContent {
             val state by Engine.state.collectAsState()
-            val log by Engine.log.collectAsState()
-            val update by Updater.state.collectAsState()
-            FiolKidApp(
-                state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, log = log,
-                update = UpdateUi(
-                    update,
-                    onCheck = { lifecycleScope.launch { Updater.check(this@MainActivity, BuildConfig.VERSION_NAME) } },
-                    onInstall = { lifecycleScope.launch { Updater.install(this@MainActivity) } },
-                ),
+            val data = AppData(
+                log = Engine.log.collectAsState().value,
+                update = Updater.state.collectAsState().value,
+                options = Options.state.collectAsState().value,
+                results = Engine.results.collectAsState().value,
+                current = Engine.current.collectAsState().value,
+                traffic = TrafficMeter.traffic.collectAsState().value,
+                lastCheck = Engine.lastCheck.collectAsState().value,
+                toast = toast.collectAsState().value,
             )
+            FiolKidApp(state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, data = data, actions = actions)
         }
     }
 
@@ -51,17 +82,41 @@ class MainActivity : ComponentActivity() {
 
     private fun power(current: Power) {
         if (current != Power.Off) {
-            send(FiolVpnService.ACTION_STOP)
+            FiolVpnService.send(this, FiolVpnService.ACTION_STOP)
             return
         }
         // Android 13+: разрешение на уведомление «FiolKid включён» (без него обход работает, просто не видно)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
         val ask = VpnService.prepare(this)
-        if (ask != null) askVpn.launch(ask) else send(FiolVpnService.ACTION_START)
+        if (ask != null) askVpn.launch(ask) else FiolVpnService.send(this, FiolVpnService.ACTION_START)
     }
 
-    private fun send(action: String) {
-        startService(Intent(this, FiolVpnService::class.java).setAction(action))
+    /** Выбор способа в списке — это ручной режим; если включено, переключаемся сразу. */
+    private fun pickStrategy(name: String) {
+        Options.update { it.copy(mode = StrategyMode.Manual, manual = name) }
+        if (Engine.state.value.power == Power.On) {
+            showToast("Переключаюсь на «$name»…")
+            FiolVpnService.send(this, FiolVpnService.ACTION_APPLY, name)
+        }
+    }
+
+    private fun copyReport() {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("FiolKid", Report.build(this)))
+        showToast("Отчёт скопирован — вставь его в сообщение")
+    }
+
+    private fun shareReport() {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, Report.build(this))
+        startActivity(Intent.createChooser(send, "Отправить отчёт"))
+    }
+
+    private fun showToast(text: String) {
+        toastJob?.cancel()
+        toast.value = text
+        toastJob = lifecycleScope.launch {
+            delay(2500)
+            toast.value = null
+        }
     }
 }

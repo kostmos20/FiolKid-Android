@@ -1,5 +1,6 @@
 package com.fiolkid.app.engine
 
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.VpnService
@@ -22,32 +23,59 @@ import java.io.File
  * VPN-режим Android: весь трафик телефона идёт в наш интерфейс, оттуда hev-socks5-tunnel отдаёт соединения
  * в byedpi, а byedpi выпускает их в интернет, запутывая DPI. Само приложение в VPN не входит — иначе byedpi
  * отправлял бы свои же соединения по кругу.
+ *
+ * Все действия (включить, выключить, проверить, замерить, сменить способ) идут через одну очередь, чтобы
+ * не мешать друг другу.
  */
 class FiolVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.fiolkid.app.START"
         const val ACTION_STOP = "com.fiolkid.app.STOP"
+        const val ACTION_CHECK = "com.fiolkid.app.CHECK"
+        const val ACTION_BENCHMARK = "com.fiolkid.app.BENCHMARK"
+        const val ACTION_APPLY = "com.fiolkid.app.APPLY"
+        const val EXTRA_STRATEGY = "strategy"
+
+        /** Проверка, пока включено, — раз в 5 минут; после двух неудач подряд подбираем способ заново. */
+        private const val WATCH_PERIOD = 5 * 60 * 1000L
+
+        fun send(context: Context, action: String, strategy: String? = null) {
+            context.startService(Intent(context, FiolVpnService::class.java).setAction(action).putExtra(EXTRA_STRATEGY, strategy))
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
     private var tun: ParcelFileDescriptor? = null
     private var meter: Job? = null
+    private var watchdog: Job? = null
+    private var failures = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> scope.launch { lock.withLock { stop() } }
-            else -> scope.launch { lock.withLock { safely { start() } } }
+        val strategy = intent?.getStringExtra(EXTRA_STRATEGY)
+        scope.launch {
+            lock.withLock {
+                safely {
+                    when (intent?.action) {
+                        ACTION_STOP -> stop()
+                        ACTION_CHECK -> recheck(byUser = true)
+                        ACTION_BENCHMARK -> benchmark()
+                        ACTION_APPLY -> apply(strategy)
+                        // Без действия запускает сама система: «Постоянная VPN» в настройках телефона
+                        else -> start()
+                    }
+                }
+            }
         }
         return START_NOT_STICKY
     }
 
-    /** Ошибка при включении — в журнал и выключиться, а не уронить программу. */
+    /** Ошибка — в журнал и выключиться, а не уронить программу. */
     private inline fun safely(block: () -> Unit) {
         try {
             block()
         } catch (e: Throwable) {
-            Engine.note("Сбой при включении: $e")
+            Engine.note("Сбой: $e")
             runCatching { stop() }
         }
     }
@@ -62,14 +90,14 @@ class FiolVpnService : VpnService() {
             this, StatusNotification.ID, notification,
             if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
         )
-        val picked = Engine.pickStrategy(this)
+        val picked = Engine.pickStrategy()
         if (picked == null) {
             Engine.note("Ни один способ обхода не запустился")
             Engine.off()
             stopSelf()
             return
         }
-        val (strategy, looks) = picked
+        val (strategy, result) = picked
         Engine.note("Работаю со способом «${strategy.name}»")
 
         val builder = Builder()
@@ -114,11 +142,14 @@ class FiolVpnService : VpnService() {
             stop()
             return
         }
-        Engine.on(looks)
+        Engine.on(result.looks)
+        if (result.allPassed) Engine.note("Все проверки прошли")
+        failures = 0
         watchTraffic()
+        watch()
     }
 
-    /** Раз в 2 секунды — сколько прошло через обход: в уведомление и в журнал. */
+    /** Раз в 2 секунды — сколько прошло через обход: в уведомление. */
     private fun watchTraffic() {
         TrafficMeter.begin(this)
         meter = scope.launch {
@@ -134,18 +165,76 @@ class FiolVpnService : VpnService() {
         }
     }
 
+    private fun watch() {
+        watchdog = scope.launch {
+            while (isActive) {
+                delay(WATCH_PERIOD)
+                lock.withLock { safely { recheck(byUser = false) } }
+            }
+        }
+    }
+
+    /** Проверка через текущий способ; две неудачи подряд — подбираем способ заново, VPN не выключая. */
+    private fun recheck(byUser: Boolean) {
+        if (tun == null) {
+            if (byUser) Engine.note("Проверка — после включения: сейчас FiolKid выключен")
+            return
+        }
+        if (byUser) Engine.note("Проверяю по просьбе")
+        val result = Engine.check()
+        Engine.on(result.looks)
+        if (result.allPassed) {
+            failures = 0
+            Engine.note("Все проверки прошли")
+            return
+        }
+        failures++
+        Engine.note("Проверка не прошла ($failures из 2)")
+        if (failures < 2) return
+        failures = 0
+        Engine.note("Подбираю способ заново")
+        Engine.connecting()
+        val picked = Engine.pickStrategy() ?: return stop()
+        Engine.note("Работаю со способом «${picked.first.name}»")
+        Engine.on(picked.second.looks)
+    }
+
+    private fun benchmark() {
+        val on = tun != null
+        val picked = Engine.benchmark { number, count -> Engine.measuring(number, count) }
+        if (!on) {
+            // Замер без VPN: byedpi был нужен только для него
+            Engine.stopDpi()
+            Engine.off()
+            stopSelf()
+            return
+        }
+        if (picked == null) return stop()
+        Engine.note("Работаю со способом «${picked.first.name}»")
+        Engine.on(picked.second.looks)
+    }
+
+    private fun apply(name: String?) {
+        val strategy = Strategies.all.firstOrNull { it.name == name } ?: return
+        if (tun == null) return
+        Engine.connecting()
+        val result = Engine.apply(strategy) ?: return stop()
+        Engine.on(result.looks)
+    }
+
     private fun stop() {
         meter?.cancel()
         meter = null
+        watchdog?.cancel()
+        watchdog = null
         if (tun != null) {
             runCatching { TrafficMeter.update(this, Tunnel.TProxyGetStats()) }
             runCatching { Tunnel.TProxyStopService() }
             tun?.close()
             tun = null
+            Engine.note("Выключено. Через обход прошло ${formatBytes(TrafficMeter.traffic.value.session)}")
         }
         Engine.stopDpi()
-        val traffic = TrafficMeter.traffic.value
-        Engine.note("Выключено. Через обход прошло ${formatBytes(traffic.session)}")
         Engine.off()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
