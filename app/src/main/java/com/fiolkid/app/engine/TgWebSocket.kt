@@ -37,7 +37,10 @@ class TgWebSocket private constructor(private val socket: Socket) {
          * («фронтинг»): тогда имя в сертификате не сверяем, как check_hostname=False в оригинале.
          * [socks] — порт byedpi: соединение идёт через обход, имя сервера byedpi узнаёт сам.
          */
-        fun connect(host: String, domain: String, path: String = "/apiws", sni: String? = null, timeoutMs: Int = 8000, socks: Int? = null): TgWebSocket {
+        fun connect(
+            host: String, domain: String, path: String = "/apiws", sni: String? = null, timeoutMs: Int = 8000, socks: Int? = null,
+            protocol: String? = "binary",
+        ): TgWebSocket {
             val raw = openSocket(socks)
             try {
                 raw.tcpNoDelay = true
@@ -50,7 +53,8 @@ class TgWebSocket private constructor(private val socket: Socket) {
 
                 val key = base64(ByteArray(16).also(random::nextBytes))
                 val request = "GET $path HTTP/1.1\r\nHost: $domain\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-                    "Sec-WebSocket-Key: $key\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\n\r\n"
+                    "Sec-WebSocket-Key: $key\r\nSec-WebSocket-Version: 13\r\n" +
+                    (if (protocol != null) "Sec-WebSocket-Protocol: $protocol\r\n" else "") + "\r\n"
                 tls.outputStream.write(request.toByteArray(Charsets.US_ASCII))
                 tls.outputStream.flush()
 
@@ -79,6 +83,11 @@ class TgWebSocket private constructor(private val socket: Socket) {
             line.append(b.toChar())
             if (line.length > 8192) throw IOException("слишком длинный заголовок")
         }
+    }
+
+    /** Сколько ждать следующего сообщения (0 — сколько угодно). */
+    fun timeout(ms: Int) {
+        socket.soTimeout = ms
     }
 
     fun send(data: ByteArray) = sendAll(listOf(data))

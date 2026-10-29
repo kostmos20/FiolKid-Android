@@ -262,6 +262,17 @@ exit:
     udp_remove (pcb);
 }
 
+/* FiolKid: QUIC (UDP 443) is dropped, so YouTube and Discord fall back to TCP,
+ * which byedpi can disguise. Same as dns_recv_handler: free and forget the pcb. */
+static void
+quic_drop_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+                   const ip_addr_t *addr, u16_t port)
+{
+    pbuf_free (p);
+    udp_recv (pcb, NULL, NULL);
+    udp_remove (pcb);
+}
+
 static void
 udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
                   const ip_addr_t *addr, u16_t port)
@@ -274,6 +285,11 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
 
     if (!READ_ONCE (run)) {
         udp_remove (pcb);
+        return;
+    }
+
+    if (port == 443) {
+        udp_recv (pcb, quic_drop_handler, NULL);
         return;
     }
 

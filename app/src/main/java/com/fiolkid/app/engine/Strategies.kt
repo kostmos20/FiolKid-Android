@@ -18,6 +18,12 @@ object Strategies {
         Strategy("DISOOB", "-q1 -r1+s -At,r,s -d1 -q3+s"),
         Strategy("SPLIT SNI", "-s1+s -d3+s -r1+s"),
         Strategy("FAKE SNI", "-f-1 -t8 -n www.google.com -r1+s -At,r,s -d1 -s1+s"),
+        // Посильнее: поддельный ClientHello со случайными данными, разрез посередине имени сайта
+        Strategy("FAKE RAND", "-f-1 -Qr -t6 -s1+sm -d3+s -r1+s -At,r,s -o1 -d1 -r1+s"),
+        Strategy("FAKE GOOGLE", "-f-1 -Qr -t8 -n www.google.com -d1+sm -s3+s -r1+s -At,r,s -o2 -d1+s"),
+        Strategy("MID SNI", "-d1+sm -r1+s -At,r,s -s1 -d1+s -s3+s -r1+s"),
+        Strategy("TLSREC MULTI", "-r1+s -r3+s -d1 -s5+s -At,r,s -d1+s -f-1 -t8"),
+        Strategy("OOB SNI", "-o1+s -d1 -s1+sm -r1+s -At,r,s -q1 -d3+s"),
     )
 
     /**

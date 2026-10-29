@@ -26,12 +26,15 @@ object Checks {
     const val TIMEOUT_MS = 10_000
     private val targets = mapOf(
         Service.YouTube to listOf("https://www.youtube.com/generate_204", "https://redirector.googlevideo.com/report_mapping"),
-        Service.Discord to listOf("https://discord.com/api/v9/gateway", "https://cdn.discordapp.com/"),
+        // Приложение Discord держит постоянное соединение с gateway: без него оно висит на загрузке,
+        // даже если discord.com открывается
+        Service.Discord to listOf("https://discord.com/api/v9/gateway", "https://cdn.discordapp.com/", "wss://gateway.discord.gg/?v=10&encoding=json"),
     )
 
     val services get() = targets.keys
 
-    fun run(port: Int): CheckResult {
+    /** [port] — SOCKS-порт byedpi; null — напрямую (тесты на компьютере). */
+    fun run(port: Int?): CheckResult {
         val started = System.nanoTime()
         val pool = Executors.newFixedThreadPool(targets.values.sumOf { it.size })
         try {
@@ -47,10 +50,11 @@ object Checks {
         }
     }
 
-    private fun open(url: String, port: Int): String? {
-        val host = URL(url).host
+    private fun open(url: String, port: Int?): String? {
+        val host = URL(url.replace("wss://", "https://")).host
         return try {
-            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+            if (url.startsWith("wss://")) return gateway(url, port)
+            val proxy = if (port == null) Proxy.NO_PROXY else Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
             val connection = URL(url).openConnection(proxy) as HttpsURLConnection
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -65,6 +69,19 @@ object Checks {
         } catch (e: Exception) {
             val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
             "$host: ${if ("timeout" in reason.lowercase() || "timed out" in reason) "нет ответа за ${TIMEOUT_MS / 1000} с" else reason}"
+        }
+    }
+
+    /** WebSocket к gateway Discord: проходит, если сервер прислал первое сообщение (HELLO, op 10). */
+    private fun gateway(url: String, port: Int?): String? {
+        val address = URL(url.replace("wss://", "https://"))
+        val ws = TgWebSocket.connect(address.host, address.host, address.file, timeoutMs = TIMEOUT_MS, socks = port, protocol = null)
+        try {
+            ws.timeout(TIMEOUT_MS)
+            val hello = ws.receive()?.toString(Charsets.UTF_8) ?: return "${address.host}: соединение закрыто"
+            return if ("\"op\":10" in hello) null else "${address.host}: неожиданный ответ"
+        } finally {
+            ws.close()
         }
     }
 }

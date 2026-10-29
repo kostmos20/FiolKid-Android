@@ -79,8 +79,17 @@ object TelegramProxy {
     @Volatile
     var socksPort: Int? = null
 
-    /** Каким путём в последний раз дошли до каждого DC. */
+    /** Каким путём в последний раз дошли до каждого DC: полное название и вид. */
     private val best = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val kinds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Домен Cloudflare, через который дошли до DC, и последние удачные домены вообще. */
+    private val cfFor = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val cfGood = LinkedHashSet<String>()
+
+    /** До какого времени не начинать с kws: он не открылся, а Cloudflare открылся. */
+    private val kwsDead = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val KWS_RETRY_MS = 10 * 60 * 1000L
     private val complained = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private val random = SecureRandom()
@@ -158,7 +167,13 @@ object TelegramProxy {
     }
 
     /** Для проверки на компьютере: забыть, какими путями доходили до DC. */
-    internal fun forgetRoutes() = best.clear()
+    internal fun forgetRoutes() {
+        best.clear()
+        kinds.clear()
+        cfFor.clear()
+        synchronized(cfGood) { cfGood.clear() }
+        kwsDead.clear()
+    }
 
     /** Проверка: открывается ли WebSocket к Telegram. Пусто — всё хорошо, иначе — причина. */
     fun probe(): String? = try {
@@ -270,35 +285,50 @@ object TelegramProxy {
 
     // --- куда отправлять ---
 
-    /** Один из путей к DC: как он называется в журнале и как его открыть. */
-    private class Route(val name: String, val open: (timeoutMs: Int) -> TgWebSocket)
+    /**
+     * Один из путей к DC: полное название (в отчёт), вид пути (в журнал — только когда вид меняется),
+     * домен Cloudflare, если это он, и как его открыть.
+     */
+    private class Route(val name: String, val kind: String, val cf: String?, val open: (timeoutMs: Int) -> TgWebSocket)
 
     /**
      * Все пути к DC по порядку: kws-сервер Telegram (обычный TLS, потом с «фронтингом»), затем домены за
      * Cloudflare. Каждый — сначала через byedpi (как на компьютере соединения tg-ws-proxy проходят через zapret:
-     * провайдер может душить и их), потом напрямую.
+     * провайдер может душить и их), потом напрямую. Если kws недавно не открылся, а Cloudflare открылся, —
+     * Cloudflare первым: у многих провайдеров kws закрыт наглухо, и каждое соединение теряло бы на нём секунды.
      */
     private fun routes(dc: Int, media: Boolean, test: Boolean): List<Route> {
         val path = if (test) "/apiws_test" else "/apiws"
+        val key = key(dc, media)
         val ways = listOfNotNull(socksPort?.let { "через обход" to it }, "напрямую" to null)
-        val list = mutableListOf<Route>()
+        val kws = mutableListOf<Route>()
         DIRECT[dc]?.let { target ->
             val domains = if (media) listOf("kws$dc-1.web.telegram.org", "kws$dc.web.telegram.org") else listOf("kws$dc.web.telegram.org")
             for (sni in listOf(null, "sprinthost.ru")) for (domain in domains) for ((way, port) in ways) {
-                val name = "${domain.substringBefore('.')}${if (sni != null) " с подменой имени" else ""}, $way"
-                list += Route(name) { timeout -> TgWebSocket.connect(target, domain, path, sni, timeout, port) }
+                val kind = "сервер Telegram${if (sni != null) " с подменой имени" else ""}, $way"
+                kws += Route("${domain.substringBefore('.')}${if (sni != null) " с подменой имени" else ""}, $way", kind, null) { timeout ->
+                    TgWebSocket.connect(target, domain, path, sni, timeout, port)
+                }
             }
         }
+        val cf = mutableListOf<Route>()
         if (!test) {
             val dcKey = if (dc == 203) 2 else dc
-            for (base in cfDomains.shuffled().take(3)) for ((way, port) in ways) {
+            // Сначала домен, через который дошли до этого DC, потом те, что недавно работали для других, потом случайные
+            val known = cfFor[key]
+            val good = synchronized(cfGood) { cfGood.toList().asReversed() }
+            val order = (listOfNotNull(known) + good + cfDomains.shuffled()).distinct().take(3)
+            for (base in order) for ((way, port) in ways) {
                 val domain = "kws$dcKey.$base"
-                list += Route("Cloudflare $base, $way") { timeout -> TgWebSocket.connect(domain, domain, timeoutMs = timeout, socks = port) }
+                cf += Route("Cloudflare $base, $way", "Cloudflare, $way", base) { timeout ->
+                    TgWebSocket.connect(domain, domain, timeoutMs = timeout, socks = port)
+                }
             }
         }
+        val list = if (System.currentTimeMillis() < (kwsDead[key] ?: 0)) cf + kws else kws + cf
         // Путь, который сработал в прошлый раз, — первым
-        val known = best[key(dc, media)]
-        return list.sortedBy { if (it.name == known) 0 else 1 }
+        val last = best[key]
+        return list.sortedBy { if (it.name == last) 0 else 1 }
     }
 
     /**
@@ -329,7 +359,7 @@ object TelegramProxy {
             val result = results.poll(maxOf(0, deadline - System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS) ?: return@repeat
             if (result is Pair<*, *>) {
                 val route = result.first as Route
-                remember(dc, media, route.name)
+                remember(dc, media, route)
                 return result.second as TgWebSocket
             }
             if (result is Exception) last = result
@@ -341,11 +371,27 @@ object TelegramProxy {
 
     private fun key(dc: Int, media: Boolean) = "DC$dc${if (media) " (медиа)" else ""}"
 
-    /** Каким путём дошли до DC — в журнал, только когда путь поменялся. */
-    private fun remember(dc: Int, media: Boolean, route: String) {
+    /** Каким путём дошли до DC. В журнал — только когда поменялся вид пути, а не каждый новый домен. */
+    private fun remember(dc: Int, media: Boolean, route: Route) {
         val key = key(dc, media)
-        if (best.put(key, route) != route) Engine.note("Telegram $key: $route")
+        best[key] = route.name
+        if (route.cf != null) {
+            cfFor[key] = route.cf
+            synchronized(cfGood) {
+                cfGood.remove(route.cf)
+                cfGood.add(route.cf)
+                if (cfGood.size > 5) cfGood.remove(cfGood.first())
+            }
+            kwsDead[key] = System.currentTimeMillis() + KWS_RETRY_MS
+        } else {
+            kwsDead.remove(key)
+        }
+        if (kinds.put(key, route.kind) != route.kind) Engine.note("Telegram $key: ${route.kind}")
     }
+
+    /** Запасной путь на IP дата-центра. */
+    private fun rememberIp(dc: Int, media: Boolean, way: String) =
+        remember(dc, media, Route("IP дата-центра, $way", "напрямую на IP дата-центра, $way", null) { throw IOException() })
 
     /** Неудача — в журнал не чаще раза в минуту для каждого DC, иначе Telegram с переподключениями завалит журнал. */
     private fun complain(dc: Int, media: Boolean, message: String) {
@@ -429,7 +475,7 @@ object TelegramProxy {
             try {
                 socket.connect(InetSocketAddress(ip, 443), ATTEMPT_MS)
                 opened = socket
-                remember(dc, media, "IP дата-центра, $way")
+                rememberIp(dc, media, way)
                 break
             } catch (_: Exception) {
                 runCatching { socket.close() }

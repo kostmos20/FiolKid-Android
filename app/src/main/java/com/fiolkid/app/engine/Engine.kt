@@ -31,6 +31,8 @@ object Engine {
     private const val PREFS = "engine"
     private const val KEY_STRATEGY = "strategy"
     private const val KEY_STEP = "step"
+    /** byedpi переходит на запасную часть способа через 3 с (-T 3): быстрее — значит, сработала основная. */
+    private const val FAST_SECONDS = 3.0
     private const val MAX_LOG = 500
 
     private val _state = MutableStateFlow(HomeState())
@@ -119,7 +121,9 @@ object Engine {
 
     /**
      * Подбирает способ обхода по выбранному режиму и оставляет byedpi запущенным с ним.
-     * Первый рабочий — сначала тот, что сработал в прошлый раз, затем остальные по порядку; самый быстрый —
+     * Первый рабочий — сначала тот, что сработал в прошлый раз, затем остальные по порядку, до первого быстрого
+     * (медленный не годится: значит, сработала только запасная часть способа); если быстрого нет — самый быстрый
+     * из рабочих. Самый быстрый —
      * замер всех; вручную — только выбранный. Если всё открыть не удалось — берём тот, с которым открылось больше.
      */
     fun pickStrategy(): Pair<Strategy, CheckResult>? {
@@ -138,7 +142,9 @@ object Engine {
         for (strategy in order) {
             val result = measure(strategy) ?: continue
             tried += strategy to result
-            if (result.allPassed && options.mode == StrategyMode.First) break
+            // Первый рабочий — но быстрый: если открылось только запасной частью способа (дольше FAST_SECONDS),
+            // ищем дальше — у такого способа видео и Discord на деле тормозят
+            if (result.allPassed && result.seconds < FAST_SECONDS && options.mode == StrategyMode.First) break
         }
         val best = tried.filter { it.second.allPassed }.minByOrNull { it.second.seconds }
             ?: tried.maxByOrNull { it.second.passed }
