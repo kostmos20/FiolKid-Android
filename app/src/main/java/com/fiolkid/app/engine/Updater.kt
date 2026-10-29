@@ -1,14 +1,12 @@
 package com.fiolkid.app.engine
 
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -87,22 +85,19 @@ object Updater {
             return@withContext
         }
         try {
-            val file = File(context.cacheDir, "update.apk")
+            val file = File(File(context.cacheDir, "updates").apply { mkdirs() }, "FiolKid.apk")
             download(release.url, file) { percent -> set("Скачиваю версию ${release.version}… $percent%", busy = true) }
             if (!sameSigner(context, file)) {
                 file.delete()
                 set("Скачанный файл подписан не нашим ключом — не ставлю")
                 return@withContext
             }
-            set("Устанавливаю…", busy = true)
-            commit(context, file)
+            openInstaller(context, file)
+            set("Открыл установку — нажми «Обновить». Если Google предупредит: «Подробнее» → «Всё равно установить»")
         } catch (e: Exception) {
             set("Не удалось обновить: ${e.message ?: e.javaClass.simpleName}")
         }
     }
-
-    /** [done] — новая версия встала; иначе её можно попробовать поставить ещё раз. */
-    internal fun installFinished(message: String, done: Boolean) = set(message, if (done) null else _state.value.available)
 
     private fun get(url: String): JSONObject {
         val connection = URL(url).openConnection() as HttpURLConnection
@@ -166,21 +161,17 @@ object Updater {
         return ours.isNotEmpty() && ours == fingerprints(archive)
     }
 
-    private fun commit(context: Context, file: File) {
-        val installer = context.packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-        if (Build.VERSION.SDK_INT >= 31)
-            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-        val id = installer.createSession(params)
-        installer.openSession(id).use { session ->
-            session.openWrite("base.apk", 0, file.length()).use { output ->
-                file.inputStream().use { it.copyTo(output) }
-                session.fsync(output)
-            }
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-            val callback = PendingIntent.getBroadcast(context, id, Intent(context, UpdateReceiver::class.java), flags)
-            session.commit(callback.intentSender)
-        }
+    /**
+     * Обычное окно установки Android — то же, что при открытии APK из файлов. Сессия установки
+     * (PackageInstaller) на Xiaomi после предупреждения Play Защиты молча отменялась.
+     */
+    private fun openInstaller(context: Context, file: File) {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     fun newer(candidate: String, current: String): Boolean {
@@ -192,24 +183,5 @@ object Updater {
             if (x != y) return x > y
         }
         return false
-    }
-}
-
-/** Ответ установщика Android: показать окно подтверждения или сообщить, чем кончилось. */
-class UpdateReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-            PackageInstaller.STATUS_SUCCESS -> Updater.installFinished("Обновлено", done = true)
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.installFinished("Обновление отменено", done = false)
-            else -> Updater.installFinished(
-                "Не установилось: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "ошибка установщика"}",
-                done = false,
-            )
-        }
     }
 }

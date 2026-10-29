@@ -16,7 +16,7 @@ android {
         minSdk = 24
         targetSdk = 35
         // Номер для Android считается из версии: 0.2.0 → 200, 1.4.12 → 10412
-        versionName = "0.3.0"
+        versionName = "0.3.1"
         versionCode = versionName!!.split('.').map(String::toInt).let { (a, b, c) -> a * 10000 + b * 100 + c }
 
         ndk {
