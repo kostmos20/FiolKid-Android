@@ -22,6 +22,8 @@ data class CheckResult(val problems: Map<Service, List<String>>, val passed: Int
  * Все адреса проверяются одновременно; время — пока не ответит последний.
  */
 object Checks {
+    /** Дольше, чем byedpi ждёт до запасной части способа (-T 3) плюс её попытка. */
+    const val TIMEOUT_MS = 10_000
     private val targets = mapOf(
         Service.YouTube to listOf("https://www.youtube.com/generate_204", "https://redirector.googlevideo.com/report_mapping"),
         Service.Discord to listOf("https://discord.com/api/v9/gateway", "https://cdn.discordapp.com/"),
@@ -50,8 +52,8 @@ object Checks {
         return try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
             val connection = URL(url).openConnection(proxy) as HttpsURLConnection
-            connection.connectTimeout = 7000
-            connection.readTimeout = 7000
+            connection.connectTimeout = TIMEOUT_MS
+            connection.readTimeout = TIMEOUT_MS
             connection.instanceFollowRedirects = false
             try {
                 // Любой ответ сервера (даже 404) — значит, соединение прошло DPI
@@ -62,7 +64,7 @@ object Checks {
             }
         } catch (e: Exception) {
             val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-            "$host: ${if ("timeout" in reason.lowercase() || "timed out" in reason) "нет ответа за 7 с" else reason}"
+            "$host: ${if ("timeout" in reason.lowercase() || "timed out" in reason) "нет ответа за ${TIMEOUT_MS / 1000} с" else reason}"
         }
     }
 }

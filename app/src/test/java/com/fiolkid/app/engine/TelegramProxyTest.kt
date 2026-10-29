@@ -13,25 +13,12 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Проверка прокси Telegram на компьютере, по-настоящему, через интернет: тест ведёт себя как приложение Telegram —
- * подключается к прокси с dd-секретом, отправляет первый запрос MTProto (req_pq_multi) и ждёт от сервера
- * Telegram ответ resPQ. Проходит — значит, рукопожатие, шифрование, деление на пакеты и WebSocket верны.
- */
-class TelegramProxyTest {
-    companion object {
-        private val secret = ByteArray(16).also { SecureRandom().nextBytes(it) }
+/** Ведёт себя как приложение Telegram: секрет прокси и первый запрос MTProto. */
+object TelegramClient {
+    val secret = ByteArray(16).also { SecureRandom().nextBytes(it) }
 
-        @BeforeClass
-        @JvmStatic
-        fun start() {
-            TelegramProxy.useSecret(secret)
-            TelegramProxy.start()
-        }
-
-        @AfterClass
-        @JvmStatic
-        fun stop() = TelegramProxy.stop()
+    init {
+        TelegramProxy.useSecret(secret)
     }
 
     private fun ctr(key: ByteArray, iv: ByteArray) =
@@ -40,7 +27,7 @@ class TelegramProxyTest {
     private fun sha256(data: ByteArray) = MessageDigest.getInstance("SHA-256").digest(data)
 
     /** Отправить req_pq_multi в [dc] через прокси и вернуть конструктор ответа. */
-    private fun askResPq(dc: Int): Int {
+    fun askResPq(dc: Int): Int {
         Socket("127.0.0.1", TelegramProxy.PORT).use { socket ->
             socket.soTimeout = 20000
             val random = SecureRandom()
@@ -79,20 +66,55 @@ class TelegramProxyTest {
         }
     }
 
+}
+
+/**
+ * Проверка прокси Telegram на компьютере, по-настоящему, через интернет: тест ведёт себя как приложение Telegram —
+ * подключается к прокси с dd-секретом, отправляет первый запрос MTProto (req_pq_multi) и ждёт от сервера
+ * Telegram ответ resPQ. Проходит — значит, рукопожатие, шифрование, деление на пакеты и WebSocket верны.
+ */
+class TelegramProxyTest {
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun start() {
+            TelegramProxy.stop()
+            TelegramProxy.forgetRoutes()
+            TelegramClient.secret
+            TelegramProxy.start()
+        }
+
+        @AfterClass
+        @JvmStatic
+        fun stop() = TelegramProxy.stop()
+    }
+
+    private fun askResPq(dc: Int) = TelegramClient.askResPq(dc)
+
     @Test
-    fun dc2ThroughWebSocket() = assertEquals("resPQ от DC2", 0x05162463, askResPq(2))
+    fun dc2ThroughWebSocket() {
+        assertEquals("resPQ от DC2", 0x05162463, askResPq(2))
+        org.junit.Assert.assertTrue(TelegramProxy.routesReport().toString(), "DC2: kws2, напрямую" in TelegramProxy.routesReport())
+    }
 
     @Test
     fun dc4ThroughWebSocket() = assertEquals("resPQ от DC4", 0x05162463, askResPq(4))
 
     @Test
-    fun dc1ThroughCloudflare() = assertEquals("resPQ от DC1", 0x05162463, askResPq(1))
+    fun dc1ThroughCloudflare() = cloudflare(1)
 
     @Test
-    fun dc3ThroughCloudflare() = assertEquals("resPQ от DC3", 0x05162463, askResPq(3))
+    fun dc3ThroughCloudflare() = cloudflare(3)
 
     @Test
-    fun dc5ThroughCloudflare() = assertEquals("resPQ от DC5", 0x05162463, askResPq(5))
+    fun dc5ThroughCloudflare() = cloudflare(5)
+
+    /** Ответ пришёл, и именно через Cloudflare, а не запасным путём на IP. */
+    private fun cloudflare(dc: Int) {
+        assertEquals("resPQ от DC$dc", 0x05162463, askResPq(dc))
+        val routes = TelegramProxy.routesReport()
+        org.junit.Assert.assertTrue(routes.toString(), routes.any { it.startsWith("DC$dc: Cloudflare") })
+    }
 
     @Test
     fun probe() = assertEquals(null, TelegramProxy.probe())

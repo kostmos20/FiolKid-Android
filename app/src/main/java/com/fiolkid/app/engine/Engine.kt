@@ -30,6 +30,7 @@ object Engine {
     const val PORT = 10808
     private const val PREFS = "engine"
     private const val KEY_STRATEGY = "strategy"
+    private const val KEY_STEP = "step"
     private const val MAX_LOG = 500
 
     private val _state = MutableStateFlow(HomeState())
@@ -58,12 +59,26 @@ object Engine {
     /** Журнал хранится в файле — после перезапуска и падения он на месте, его видно в отчёте. */
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        _results.value = prefs.getStringSet("results", emptySet()).orEmpty().mapNotNull(::parseResult).toMap()
+        _results.value = prefs.getStringSet("results", emptySet()).orEmpty().mapNotNull(::parseResult)
+            // Замеры способов, которых больше нет (FAKE MD5 убран в 0.5.0), не показываем
+            .filter { (name, _) -> Strategies.all.any { it.name == name } }.toMap()
         val file = File(context.filesDir, "log.txt")
         logFile = file
         if (file.exists())
             _log.value = file.readLines().takeLast(MAX_LOG)
         note("Программа запущена ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}")
+        prefs.getString(KEY_STEP, null)?.let {
+            note("Прошлый раз программа закрылась сама, не выключившись (шаг: $it) — её мог остановить телефон или сбой")
+            step(null)
+        }
+    }
+
+    /**
+     * Что служба делает сейчас. Если процесс тихо умрёт (сбой в byedpi или телефон его убьёт), записи об ошибке
+     * не будет — а этот шаг при следующем запуске окажется в журнале.
+     */
+    fun step(name: String?) {
+        prefs.edit().putString(KEY_STEP, name).commit()
     }
 
     fun show(state: HomeState) {

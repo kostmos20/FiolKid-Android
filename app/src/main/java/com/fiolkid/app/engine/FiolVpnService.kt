@@ -53,6 +53,8 @@ class FiolVpnService : VpnService() {
     private var meter: Job? = null
     private var watchdog: Job? = null
     private var failures = 0
+    /** Сколько адресов открылось, когда способ выбирали: хуже не стало — подбирать заново незачем. */
+    private var pickedPassed = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val strategy = intent?.getStringExtra(EXTRA_STRATEGY)
@@ -94,12 +96,13 @@ class FiolVpnService : VpnService() {
             this, StatusNotification.ID, notification,
             if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
         )
+        // Прокси Telegram — сразу, не дожидаясь подбора способа: иначе Telegram минуту висит на «Соединение»
+        startTelegram()
+        Engine.step("подбор способа")
         val picked = Engine.pickStrategy()
         if (picked == null) {
             Engine.note("Ни один способ обхода не запустился")
-            Engine.off()
-            stopSelf()
-            return
+            return stop()
         }
         val (strategy, result) = picked
         Engine.note("Работаю со способом «${strategy.name}»")
@@ -114,18 +117,14 @@ class FiolVpnService : VpnService() {
             .addDnsServer("1.1.1.1")
             .addDnsServer("8.8.8.8")
             .addDisallowedApplication(packageName)
+        Engine.step("включение VPN")
         val descriptor = try {
             builder.establish()
         } catch (e: Exception) {
             Engine.note("VPN не включился: ${e.message}")
             null
         }
-        if (descriptor == null) {
-            Engine.stopDpi()
-            Engine.off()
-            stopSelf()
-            return
-        }
+        if (descriptor == null) return stop()
         tun = descriptor
 
         val config = File(filesDir, "tunnel.yml")
@@ -141,12 +140,15 @@ class FiolVpnService : VpnService() {
               task-stack-size: 81920
             """.trimIndent(),
         )
+        Engine.step("запуск перенаправителя трафика")
         if (!Tunnel.TProxyStartService(config.absolutePath, descriptor.fd)) {
             Engine.note("Не запустился перенаправитель трафика")
             stop()
             return
         }
-        startTelegram()
+        Engine.note("VPN включён")
+        Engine.step("работа")
+        pickedPassed = result.passed
         Engine.on(result.looks + (Service.Telegram to Engine.telegramLook()))
         if (result.allPassed) Engine.note("Все проверки прошли")
         failures = 0
@@ -197,15 +199,24 @@ class FiolVpnService : VpnService() {
         Engine.note("Проверка не прошла ($failures из 2)")
         if (failures < 2) return
         failures = 0
+        // Перебор способов идёт прямо на рабочем соединении и рвёт его — только если стало хуже, чем при выборе
+        if (result.passed >= pickedPassed) {
+            Engine.note("Открылось столько же, сколько при выборе способа (${result.passed} из ${result.total}) — способ не меняю")
+            return
+        }
         Engine.note("Подбираю способ заново")
         Engine.connecting()
+        Engine.step("подбор способа заново")
         val picked = Engine.pickStrategy() ?: return stop()
+        Engine.step("работа")
+        pickedPassed = picked.second.passed
         Engine.note("Работаю со способом «${picked.first.name}»")
         Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
     }
 
     /** Прокси Telegram работает, пока включён FiolKid; первое подключение Telegram сразу зажигает карточку. */
     private fun startTelegram() {
+        TelegramProxy.socksPort = Engine.PORT
         TelegramProxy.onFirstClient = { Engine.update(Service.Telegram, Look.Working) }
         try {
             TelegramProxy.start()
@@ -233,6 +244,7 @@ class FiolVpnService : VpnService() {
             return
         }
         if (picked == null) return stop()
+        pickedPassed = picked.second.passed
         Engine.note("Работаю со способом «${picked.first.name}»")
         Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
     }
@@ -243,6 +255,7 @@ class FiolVpnService : VpnService() {
         val telegram = Engine.state.value.looks.getValue(Service.Telegram)
         Engine.connecting()
         val result = Engine.apply(strategy) ?: return stop()
+        pickedPassed = result.passed
         Engine.on(result.looks + (Service.Telegram to telegram))
     }
 
@@ -261,6 +274,7 @@ class FiolVpnService : VpnService() {
         }
         Engine.stopDpi()
         Engine.off()
+        Engine.step(null)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

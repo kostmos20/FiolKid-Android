@@ -6,7 +6,6 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.SecureRandom
-import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -36,18 +35,18 @@ class TgWebSocket private constructor(private val socket: Socket) {
         /**
          * Подключиться к [host] (IP или имя) на 443 и открыть WebSocket к [domain]. [sni] — другое имя в TLS
          * («фронтинг»): тогда имя в сертификате не сверяем, как check_hostname=False в оригинале.
+         * [socks] — порт byedpi: соединение идёт через обход, имя сервера byedpi узнаёт сам.
          */
-        fun connect(host: String, domain: String, path: String = "/apiws", sni: String? = null, timeoutMs: Int = 8000): TgWebSocket {
-            val raw = Socket()
+        fun connect(host: String, domain: String, path: String = "/apiws", sni: String? = null, timeoutMs: Int = 8000, socks: Int? = null): TgWebSocket {
+            val raw = openSocket(socks)
             try {
                 raw.tcpNoDelay = true
-                raw.connect(InetSocketAddress(host, 443), timeoutMs)
+                raw.connect(if (socks != null) InetSocketAddress.createUnresolved(host, 443) else InetSocketAddress(host, 443), timeoutMs)
                 raw.soTimeout = timeoutMs
                 val tlsName = sni ?: domain
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, tlsName, 443, true) as SSLSocket
                 tls.startHandshake()
-                if (sni == null && !HttpsURLConnection.getDefaultHostnameVerifier().verify(domain, tls.session))
-                    throw IOException("сертификат не для $domain")
+                if (sni == null && !certFor(tls, domain)) throw IOException("сертификат не для $domain")
 
                 val key = base64(ByteArray(16).also(random::nextBytes))
                 val request = "GET $path HTTP/1.1\r\nHost: $domain\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
@@ -159,6 +158,23 @@ class TgWebSocket private constructor(private val socket: Socket) {
         return header.toByteArray()
     }
 }
+
+/**
+ * Сертификат выдан на [domain]: цепочку доверия уже проверил TLS, здесь — имя (в том числе *.домен).
+ * Своя проверка, а не HostnameVerifier: на компьютере (в тестах) стандартный всегда отвечает «нет».
+ */
+private fun certFor(tls: SSLSocket, domain: String): Boolean {
+    val cert = tls.session.peerCertificates.firstOrNull() as? java.security.cert.X509Certificate ?: return false
+    val names = cert.subjectAlternativeNames.orEmpty().filter { it[0] == 2 }.map { (it[1] as String).lowercase() }
+    val host = domain.lowercase()
+    return names.any { name ->
+        name == host || (name.startsWith("*.") && host.endsWith(name.substring(1)) && host.count { it == '.' } == name.count { it == '.' })
+    }
+}
+
+/** Обычный сокет или сокет через SOCKS-порт byedpi на этом телефоне. */
+internal fun openSocket(socks: Int?): Socket =
+    if (socks == null) Socket() else Socket(java.net.Proxy(java.net.Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socks)))
 
 /** Base64 для ключа рукопожатия (java.util.Base64 есть только с Android 8). */
 private fun base64(data: ByteArray): String {

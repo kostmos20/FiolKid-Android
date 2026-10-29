@@ -36,7 +36,8 @@ data class TelegramState(
  * шифрует заново обычной обфускацией Telegram и отправляет через WebSocket на kws*.web.telegram.org — их
  * не блокируют, ими пользуется веб-версия. DC 1, 3 и 5 — через домены за Cloudflare, в крайнем случае напрямую.
  *
- * Приложение не входит в свой VPN, поэтому соединения прокси идут в интернет напрямую, мимо byedpi.
+ * Приложение не входит в свой VPN, поэтому соединения прокси сами идут через SOCKS-порт byedpi — как на компьютере
+ * соединения tg-ws-proxy проходят через zapret, — а если не вышло, напрямую.
  */
 object TelegramProxy {
     const val PORT = 1443
@@ -70,7 +71,17 @@ object TelegramProxy {
 
     @Volatile
     private var cfDomains: List<String> = CF_ENCODED.map(::decodeDomain)
-    private val cfForDc = mutableMapOf<Int, String>()
+
+    private const val ATTEMPT_MS = 6000
+    private const val STAGGER_MS = 400L
+
+    /** Порт byedpi: через него соединения прокси проходят обход. null — только напрямую (тест на компьютере). */
+    @Volatile
+    var socksPort: Int? = null
+
+    /** Каким путём в последний раз дошли до каждого DC. */
+    private val best = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val complained = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private val random = SecureRandom()
     private lateinit var secret: ByteArray
@@ -146,6 +157,9 @@ object TelegramProxy {
         secret = value
     }
 
+    /** Для проверки на компьютере: забыть, какими путями доходили до DC. */
+    internal fun forgetRoutes() = best.clear()
+
     /** Проверка: открывается ли WebSocket к Telegram. Пусто — всё хорошо, иначе — причина. */
     fun probe(): String? = try {
         openWs(2, media = false, test = false).close()
@@ -187,13 +201,14 @@ object TelegramProxy {
             val ws = try {
                 openWs(dc, parsed.media, test)
             } catch (e: Exception) {
+                complain(dc, parsed.media, "WebSocket не открылся (${e.message ?: e.javaClass.simpleName}), пробую напрямую на IP")
                 null
             }
             if (ws != null) {
                 ws.send(relayInit)
                 bridgeWs(client, input, ws, crypto, Splitter(proto))
             } else {
-                tcpFallback(client, input, dc, test, relayInit, crypto)
+                tcpFallback(client, input, dc, parsed.media, test, relayInit, crypto)
             }
         } catch (_: Exception) {
             // Telegram сам переподключится
@@ -255,38 +270,94 @@ object TelegramProxy {
 
     // --- куда отправлять ---
 
-    /** WebSocket к нужному DC: напрямую на kws (сначала обычный TLS, потом с «фронтингом»), иначе через Cloudflare. */
-    private fun openWs(dc: Int, media: Boolean, test: Boolean): TgWebSocket {
+    /** Один из путей к DC: как он называется в журнале и как его открыть. */
+    private class Route(val name: String, val open: (timeoutMs: Int) -> TgWebSocket)
+
+    /**
+     * Все пути к DC по порядку: kws-сервер Telegram (обычный TLS, потом с «фронтингом»), затем домены за
+     * Cloudflare. Каждый — сначала через byedpi (как на компьютере соединения tg-ws-proxy проходят через zapret:
+     * провайдер может душить и их), потом напрямую.
+     */
+    private fun routes(dc: Int, media: Boolean, test: Boolean): List<Route> {
         val path = if (test) "/apiws_test" else "/apiws"
-        val target = DIRECT[dc]
-        var last: Exception? = null
-        if (target != null) {
+        val ways = listOfNotNull(socksPort?.let { "через обход" to it }, "напрямую" to null)
+        val list = mutableListOf<Route>()
+        DIRECT[dc]?.let { target ->
             val domains = if (media) listOf("kws$dc-1.web.telegram.org", "kws$dc.web.telegram.org") else listOf("kws$dc.web.telegram.org")
-            for (domain in domains) for (sni in listOf(null, "sprinthost.ru")) {
-                try {
-                    return TgWebSocket.connect(target, domain, path, sni)
-                } catch (e: Exception) {
-                    last = e
-                }
+            for (sni in listOf(null, "sprinthost.ru")) for (domain in domains) for ((way, port) in ways) {
+                val name = "${domain.substringBefore('.')}${if (sni != null) " с подменой имени" else ""}, $way"
+                list += Route(name) { timeout -> TgWebSocket.connect(target, domain, path, sni, timeout, port) }
             }
         }
         if (!test) {
             val dcKey = if (dc == 203) 2 else dc
-            val preferred = synchronized(cfForDc) { cfForDc[dcKey] }
-            val order = listOfNotNull(preferred) + cfDomains.shuffled().filter { it != preferred }
-            for (base in order.take(6)) {
+            for (base in cfDomains.shuffled().take(3)) for ((way, port) in ways) {
                 val domain = "kws$dcKey.$base"
-                try {
-                    val ws = TgWebSocket.connect(domain, domain, timeoutMs = 10000)
-                    synchronized(cfForDc) { cfForDc[dcKey] = base }
-                    return ws
-                } catch (e: Exception) {
-                    last = e
-                }
+                list += Route("Cloudflare $base, $way") { timeout -> TgWebSocket.connect(domain, domain, timeoutMs = timeout, socks = port) }
             }
         }
-        throw last ?: IOException("нет пути к DC$dc")
+        // Путь, который сработал в прошлый раз, — первым
+        val known = best[key(dc, media)]
+        return list.sortedBy { if (it.name == known) 0 else 1 }
     }
+
+    /**
+     * WebSocket к нужному DC. Пути пробуются почти одновременно, с шагом [STAGGER_MS]: Telegram ждёт ответа
+     * секунд 10, перебирать по очереди с долгими тайм-аутами нельзя. Первый открывшийся побеждает.
+     */
+    private fun openWs(dc: Int, media: Boolean, test: Boolean): TgWebSocket {
+        val routes = routes(dc, media, test)
+        if (routes.isEmpty()) throw IOException("нет пути к DC$dc")
+        val results = java.util.concurrent.LinkedBlockingQueue<Any>()
+        val won = java.util.concurrent.atomic.AtomicBoolean(false)
+        routes.forEachIndexed { index, route ->
+            thread(name = "tg-route", isDaemon = true) {
+                if (index > 0) Thread.sleep(STAGGER_MS * index)
+                if (won.get()) return@thread results.put(Unit)
+                val result: Any = try {
+                    route to route.open(ATTEMPT_MS)
+                } catch (e: Exception) {
+                    e
+                }
+                if (result is Pair<*, *> && !won.compareAndSet(false, true)) (result.second as TgWebSocket).close()
+                else results.put(result)
+            }
+        }
+        val deadline = System.currentTimeMillis() + ATTEMPT_MS + STAGGER_MS * routes.size + 1000
+        var last: Exception? = null
+        repeat(routes.size) {
+            val result = results.poll(maxOf(0, deadline - System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS) ?: return@repeat
+            if (result is Pair<*, *>) {
+                val route = result.first as Route
+                remember(dc, media, route.name)
+                return result.second as TgWebSocket
+            }
+            if (result is Exception) last = result
+        }
+        // Кто-то мог открыться уже после срока — его закроет поток, увидев won
+        won.set(true)
+        throw last ?: IOException("нет ответа")
+    }
+
+    private fun key(dc: Int, media: Boolean) = "DC$dc${if (media) " (медиа)" else ""}"
+
+    /** Каким путём дошли до DC — в журнал, только когда путь поменялся. */
+    private fun remember(dc: Int, media: Boolean, route: String) {
+        val key = key(dc, media)
+        if (best.put(key, route) != route) Engine.note("Telegram $key: $route")
+    }
+
+    /** Неудача — в журнал не чаще раза в минуту для каждого DC, иначе Telegram с переподключениями завалит журнал. */
+    private fun complain(dc: Int, media: Boolean, message: String) {
+        val key = key(dc, media)
+        val now = System.currentTimeMillis()
+        if (now - (complained[key] ?: 0) < 60_000) return
+        complained[key] = now
+        Engine.note("Telegram $key: $message")
+    }
+
+    /** Пути до каждого DC — для отчёта. */
+    fun routesReport(): List<String> = best.entries.sortedBy { it.key }.map { "${it.key}: ${it.value}" }
 
     private fun refreshDomains() {
         runCatching {
@@ -349,12 +420,23 @@ object TelegramProxy {
         }
     }
 
-    /** Последняя попытка — напрямую на IP дата-центра (часто заблокирован, но вдруг). */
-    private fun tcpFallback(client: Socket, input: InputStream, dc: Int, test: Boolean, relayInit: ByteArray, crypto: Crypto) {
+    /** Последняя попытка — на IP дата-центра, через обход или напрямую (часто заблокирован, но вдруг). */
+    private fun tcpFallback(client: Socket, input: InputStream, dc: Int, media: Boolean, test: Boolean, relayInit: ByteArray, crypto: Crypto) {
         val ip = (if (test) DC_TEST_IPS else DC_IPS)[dc] ?: return
-        val remote = Socket()
+        var opened: Socket? = null
+        for ((way, port) in listOfNotNull(socksPort?.let { "через обход" to it }, "напрямую" to null)) {
+            val socket = openSocket(port)
+            try {
+                socket.connect(InetSocketAddress(ip, 443), ATTEMPT_MS)
+                opened = socket
+                remember(dc, media, "IP дата-центра, $way")
+                break
+            } catch (_: Exception) {
+                runCatching { socket.close() }
+            }
+        }
+        val remote = opened ?: return complain(dc, media, "не открылся ни один путь — Telegram будет висеть на «Соединение»")
         try {
-            remote.connect(InetSocketAddress(ip, 443), 10000)
             remote.tcpNoDelay = true
             remote.getOutputStream().write(relayInit)
             val down = pump(remote.getInputStream(), client.getOutputStream(), crypto.tgDec, crypto.cltEnc) { runCatching { client.close() } }

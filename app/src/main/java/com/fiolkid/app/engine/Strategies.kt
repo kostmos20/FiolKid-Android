@@ -15,14 +15,17 @@ object Strategies {
         Strategy("DISORDER TLSREC", "-d1 -r1+s -At,r,s -d1 -f-1 -t8"),
         Strategy("OOB", "-o1 -d1 -r1+s -At,r,s -o2 -s1+s -d3+s"),
         Strategy("FAKE TTL", "-f-1 -t6 -r1+s -At,r,s -d1+s -f-1 -t8"),
-        Strategy("FAKE MD5", "-f-1 -S -r3+s -At,r,s -d1 -s1+s"),
         Strategy("DISOOB", "-q1 -r1+s -At,r,s -d1 -q3+s"),
         Strategy("SPLIT SNI", "-s1+s -d3+s -r1+s"),
         Strategy("FAKE SNI", "-f-1 -t8 -n www.google.com -r1+s -At,r,s -d1 -s1+s"),
     )
 
-    /** Полные аргументы byedpi: только на 127.0.0.1 — чтобы прокси не был виден другим устройствам в сети. */
+    /**
+     * Полные аргументы byedpi: только на 127.0.0.1 — чтобы прокси не был виден другим устройствам в сети.
+     * -T 3: через 3 с без ответа byedpi пробует запасную часть способа (после -At) — проверка ждёт дольше
+     * ([Checks.TIMEOUT_MS]), чтобы её успеть увидеть.
+     */
     fun args(strategy: Strategy, port: Int): Array<String> =
-        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "5") + Udp.split(' ') + strategy.args.split(' '))
+        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "3") + Udp.split(' ') + strategy.args.split(' '))
             .toTypedArray()
 }
