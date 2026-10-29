@@ -33,10 +33,30 @@ object Updater {
     private const val REPO = "kostmos20/FiolKid-Android"
     private const val PREFS = "updates"
     private const val KEY_CHECKED = "checked"
+    private const val KEY_VERSION = "version"
     private const val PERIOD = 6 * 60 * 60 * 1000L
 
     private val _state = MutableStateFlow(UpdateState())
     val state: StateFlow<UpdateState> = _state.asStateFlow()
+
+    /** Версия, до которой программа только что обновилась (показать «FiolKid обновлён до …»), иначе null. */
+    var justUpdated: String? = null
+        private set
+
+    /** При запуске: если версия сменилась с прошлого раза — значит, обновились. */
+    fun noteVersion(context: Context, current: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val previous = prefs.getString(KEY_VERSION, null)
+        if (previous != null && previous != current) {
+            Engine.note("Обновлено: $previous → $current")
+            justUpdated = current
+        }
+        prefs.edit().putString(KEY_VERSION, current).apply()
+    }
+
+    fun forgetJustUpdated() {
+        justUpdated = null
+    }
 
     private fun set(status: String, available: Release? = _state.value.available, busy: Boolean = false) {
         _state.value = UpdateState(status, available, busy)

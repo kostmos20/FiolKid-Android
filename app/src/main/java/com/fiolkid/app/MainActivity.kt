@@ -72,6 +72,10 @@ class MainActivity : ComponentActivity() {
             )
             FiolKidApp(state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, data = data, actions = actions)
         }
+        Updater.justUpdated?.let {
+            showToast("FiolKid обновлён до $it", 4000)
+            Updater.forgetJustUpdated()
+        }
     }
 
     override fun onResume() {
@@ -111,11 +115,11 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(send, "Отправить отчёт"))
     }
 
-    private fun showToast(text: String) {
+    private fun showToast(text: String, millis: Long = 2500) {
         toastJob?.cancel()
         toast.value = text
         toastJob = lifecycleScope.launch {
-            delay(2500)
+            delay(millis)
             toast.value = null
         }
     }

@@ -4,6 +4,7 @@ import android.app.Application
 import com.fiolkid.app.engine.Engine
 import com.fiolkid.app.engine.Options
 import com.fiolkid.app.engine.TrafficMeter
+import com.fiolkid.app.engine.Updater
 import java.io.File
 
 /**
@@ -16,6 +17,7 @@ class App : Application() {
         Options.load(this)
         Engine.init(this)
         TrafficMeter.load(this)
+        Updater.noteVersion(this, BuildConfig.VERSION_NAME)
         val crash = File(filesDir, "crash.txt")
         if (crash.exists()) {
             Engine.note("Прошлый раз программа упала:")

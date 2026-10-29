@@ -20,7 +20,7 @@ class ScreenshotTest {
     private val now = LocalDateTime.of(2026, 10, 29, 12, 0, 0)
     private val working = HomeState(Power.On, HomeState.looks(Look.Working, Look.Working))
 
-    private val sample = AppData(
+    internal val sample = AppData(
         log = listOf(
             "12:11:33  Программа запущена 29.10.2026",
             "12:11:33  Включено",
@@ -76,5 +76,20 @@ class ScreenshotTest {
     fun settingsManual() = paparazzi.snapshot {
         val data = sample.copy(options = OptionsState(mode = StrategyMode.Manual, manual = "DISORDER TLSREC"), toast = "Отчёт скопирован — вставь его в сообщение")
         FiolKidApp(working, "0.3.0", {}, time = 3f, now = now, initialTab = Tab.Settings, data = data)
+    }
+}
+
+/** Вся страница настроек целиком (высокий экран) — с найденным обновлением и тем, что в нём нового. */
+class TallScreenshotTest {
+    @get:Rule
+    val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 5200), theme = "android:Theme.Material.NoActionBar")
+
+    @Test
+    fun settingsFull() = paparazzi.snapshot {
+        val notes = "После обновления программа пишет «FiolKid обновлён до …», а здесь видно, что нового в версии." +
+            "\n\n### Как установить\n…"
+        val base = ScreenshotTest().sample
+        val data = base.copy(update = UpdateState("Вышла версия 0.3.2", Release("0.3.2", "", notes)))
+        FiolKidApp(HomeState(Power.On, HomeState.looks(Look.Working, Look.Working)), "0.3.1", {}, time = 3f, initialTab = Tab.Settings, data = data)
     }
 }

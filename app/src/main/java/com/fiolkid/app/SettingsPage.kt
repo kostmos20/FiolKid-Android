@@ -166,6 +166,24 @@ private fun UpdatesPanel(version: String, data: AppData, actions: AppActions) {
             }
         }
         Hint(update.status.ifEmpty { "Ещё не проверял" })
+        // Что нового в найденной версии — текст со страницы выпуска, до раздела «Как установить»
+        val notes = available?.notes?.substringBefore("###")?.trim()
+        if (!notes.isNullOrEmpty()) {
+            val shape = RoundedCornerShape(11.u)
+            Column(
+                Modifier.padding(top = 12.u).fillMaxWidth().background(Palette.Well, shape)
+                    .border(1.dp, Color(0x0BFFFFFF), shape).padding(12.u),
+            ) {
+                BasicText(
+                    "Что нового в ${available.version}",
+                    style = TextStyle(color = Color(0xFFEAD1AC), fontSize = 12.us, fontWeight = FontWeight.SemiBold),
+                )
+                BasicText(
+                    notes, Modifier.padding(top = 6.u),
+                    style = TextStyle(color = Palette.Muted, fontSize = 12.us, lineHeight = 19.us),
+                )
+            }
+        }
         Column(Modifier.padding(top = 14.u), verticalArrangement = Arrangement.spacedBy(9.u)) {
             if (available != null)
                 FiolButton("Обновить до ${available.version}", icon = Icons.Download, gold = true, enabled = !update.busy, onClick = actions.installUpdate)
