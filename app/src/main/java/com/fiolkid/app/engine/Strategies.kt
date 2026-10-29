@@ -2,13 +2,27 @@ package com.fiolkid.app.engine
 
 /**
  * Способы обхода («альты») для byedpi — аналог стратегий zapret в версии для компьютера. Перебираем по порядку,
- * пока YouTube и Discord не откроются. Перед каждым — отдельная группа для UDP (QUIC, голос Discord):
- * один поддельный пакет, дальше — TCP-группы стратегии.
+ * пока YouTube и Discord не откроются. Перед каждым — отдельная группа для UDP (голос Discord) и цепочка
+ * для видеосерверов YouTube ([Video]), дальше — TCP-группы стратегии.
  */
 data class Strategy(val name: String, val args: String)
 
 object Strategies {
-    private const val Udp = "-Ku -a1 -An -Kt,h"
+
+    /**
+     * Видео YouTube идёт не с youtube.com, а с серверов googlevideo.com — часто они стоят прямо в сети провайдера,
+     * и подделке до них нужен другой TTL, чем до youtube.com. Поэтому для них — своя цепочка, независимо от
+     * выбранного способа: как ALT9 (подделка имени на www.google.com) с TTL 3, 2, 4, 5 и вариант без подделки.
+     * Не открылось за 3 с — byedpi сам берёт следующий вариант и запоминает удачный для этого сервера.
+     */
+    private val Video = listOf(
+        "-f1+s -t3 -n www.google.com -d1+sm -s3+s",
+        "-f1+s -t2 -n www.google.com -d1+sm -s3+s",
+        "-f1+s -t4 -n www.google.com -d1+sm -s3+s",
+        "-s1 -d1 -s5+s -r1+s",
+        "-f1+s -t5 -n www.google.com -d1+sm -s3+s",
+    ).mapIndexed { index, variant -> (if (index == 0) "" else "-At,r,s ") + "-Kt -H :googlevideo.com " + variant }
+        .joinToString(" ")
 
     /** Остальные способы — после основного и сильных под Дом.ру (как ALT4 и ALT9 на компьютере), чтобы тех не ждать. */
     private val base = listOf(
@@ -44,6 +58,7 @@ object Strategies {
      * ([Checks.TIMEOUT_MS]), чтобы её успеть увидеть.
      */
     fun args(strategy: Strategy, port: Int): Array<String> =
-        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "3") + Udp.split(' ') + strategy.args.split(' '))
+        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "3") + "-Ku -a1 -An".split(' ') + Video.split(' ') +
+            "-An -Kt,h".split(' ') + strategy.args.split(' '))
             .toTypedArray()
 }
