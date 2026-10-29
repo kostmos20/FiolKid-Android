@@ -22,3 +22,26 @@
 ## Если что-то не работает
 
 Открой вкладку «Журнал», сделай скриншот и пришли его тому, кто дал тебе программу.
+
+---
+
+## Как устроено
+
+Приложение поднимает системный VPN Android (`VpnService`) и само раскладывает трафик:
+
+| Что | Как |
+|---|---|
+| YouTube, Discord | обход DPI на телефоне: [byedpi](https://github.com/hufrea/byedpi) |
+| Трафик телефона → byedpi | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) |
+| Telegram | скоро: WebSocket-прокси, как tg-ws-proxy в версии для ПК |
+| ИИ-сайты и списки | скоро: AmneziaWG по ключу `vpn://` или подписка |
+
+Kotlin + Jetpack Compose. Исходники byedpi и hev-socks5-tunnel (обе под MIT) лежат как есть в `app/src/main/jni`.
+
+## Сборка и выпуск
+
+Нужны JDK 17, Android SDK и NDK 27 (без интерфейса Android Studio). Скриншоты экранов без телефона:
+`gradlew recordPaparazziDebug` → `app/src/test/snapshots/images`.
+
+Выпуск: поднять `versionName` в `app/build.gradle.kts` и запустить
+`tools\publish-release.ps1 -NotesFile заметки.txt` — соберёт подписанный APK и выложит его в Releases.
