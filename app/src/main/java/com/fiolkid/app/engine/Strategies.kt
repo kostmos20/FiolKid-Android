@@ -10,19 +10,35 @@ data class Strategy(val name: String, val args: String)
 object Strategies {
 
     /**
+     * Настоящий ClientHello Chrome к www.google.com (tls_clienthello_www_google_com.bin из zapret, как в ALT4 на
+     * компьютере) — путь к файлу на телефоне. Пока не задан (тесты), варианты с ним пропускаются.
+     */
+    @Volatile
+    var googleHello: String? = null
+
+    /**
      * Видео YouTube идёт не с youtube.com, а с серверов googlevideo.com — часто они стоят прямо в сети провайдера,
      * и подделке до них нужен другой TTL, чем до youtube.com. Поэтому для них — своя цепочка, независимо от
-     * выбранного способа: как ALT9 (подделка имени на www.google.com) с TTL 3, 2, 4, 5 и вариант без подделки.
-     * Не открылось за 3 с — byedpi сам берёт следующий вариант и запоминает удачный для этого сервера.
+     * выбранного способа. Не открылось за 3 с — byedpi сам берёт следующий вариант и запоминает удачный для этого
+     * сервера. Названия — для журнала: номер группы byedpi = 1 + номер варианта (группа 0 — UDP).
      */
-    private val Video = listOf(
-        "-f1+s -t3 -n www.google.com -d1+sm -s3+s",
-        "-f1+s -t2 -n www.google.com -d1+sm -s3+s",
-        "-f1+s -t4 -n www.google.com -d1+sm -s3+s",
-        "-s1 -d1 -s5+s -r1+s",
-        "-f1+s -t5 -n www.google.com -d1+sm -s3+s",
-    ).mapIndexed { index, variant -> (if (index == 0) "" else "-At,r,s ") + "-Kt -H :googlevideo.com " + variant }
-        .joinToString(" ")
+    fun videoVariants(): List<Pair<String, String>> {
+        val hello = googleHello
+        val real = { ttl: Int -> "настоящий ClientHello Google, TTL $ttl" to "-f-1 -t$ttl -l $hello -r1+s" }
+        return listOfNotNull(
+            hello?.let { real(3) },
+            hello?.let { real(2) },
+            hello?.let { real(4) },
+            "как ALT9, TTL 3" to "-f1+s -t3 -n www.google.com -d1+sm -s3+s",
+            hello?.let { real(5) },
+            "как ALT9, TTL 2" to "-f1+s -t2 -n www.google.com -d1+sm -s3+s",
+            "без подделки" to "-s1 -d1 -s5+s -r1+s",
+        )
+    }
+
+    private fun video() = videoVariants().mapIndexed { index, (_, variant) ->
+        (if (index == 0) "" else "-At,r,s ") + "-Kt -H :googlevideo.com " + variant
+    }.joinToString(" ")
 
     /** Остальные способы — после основного и сильных под Дом.ру (как ALT4 и ALT9 на компьютере), чтобы тех не ждать. */
     private val base = listOf(
@@ -57,8 +73,8 @@ object Strategies {
      * -T 3: через 3 с без ответа byedpi пробует запасную часть способа (после -At) — проверка ждёт дольше
      * ([Checks.TIMEOUT_MS]), чтобы её успеть увидеть.
      */
-    fun args(strategy: Strategy, port: Int): Array<String> =
-        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "3") + "-Ku -a1 -An".split(' ') + Video.split(' ') +
-            "-An -Kt,h".split(' ') + strategy.args.split(' '))
+    fun args(strategy: Strategy, port: Int, cacheDump: String? = null): Array<String> =
+        (listOf("-i", "127.0.0.1", "-p", port.toString(), "-T", "3") + listOfNotNull(cacheDump?.let { "-y" }, cacheDump) +
+            "-Ku -a1 -An".split(' ') + video().split(' ') + "-An -Kt,h".split(' ') + strategy.args.split(' '))
             .toTypedArray()
 }

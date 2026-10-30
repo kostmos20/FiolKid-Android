@@ -272,7 +272,7 @@ class FiolVpnService : VpnService() {
             tun = null
             Engine.note("Выключено. Через обход прошло ${formatBytes(TrafficMeter.traffic.value.session)}")
         }
-        Engine.stopDpi()
+        Engine.stopDpi(noteVideo = true)
         Engine.off()
         Engine.step(null)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

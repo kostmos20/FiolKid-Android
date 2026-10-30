@@ -56,11 +56,20 @@ object Engine {
     /** С каким способом byedpi запущен сейчас. */
     private var running: String? = null
     private var logFile: File? = null
+    /** Куда byedpi при выключении пишет, какой вариант сработал для каждого сервера. */
+    private var cacheDump: File? = null
     private lateinit var prefs: android.content.SharedPreferences
 
     /** Журнал хранится в файле — после перезапуска и падения он на месте, его видно в отчёте. */
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        cacheDump = File(context.filesDir, "dpi-cache.txt")
+        // Подделка для видеосерверов — файл из ресурсов приложения, byedpi читает его по пути
+        runCatching {
+            val hello = File(context.filesDir, "tls_clienthello_www_google_com.bin")
+            context.assets.open(hello.name).use { input -> hello.outputStream().use(input::copyTo) }
+            Strategies.googleHello = hello.absolutePath
+        }.onFailure { note("Не нашёл подделку ClientHello Google: ${it.message}") }
         _results.value = prefs.getStringSet("results", emptySet()).orEmpty().mapNotNull(::parseResult)
             // Замеры способов, которых больше нет (FAKE MD5 убран в 0.5.0), не показываем
             .filter { (name, _) -> Strategies.all.any { it.name == name } }.toMap()
@@ -214,7 +223,8 @@ object Engine {
     /** Запускает byedpi в своём потоке и ждёт, пока он начнёт принимать подключения. */
     fun startDpi(strategy: Strategy): Boolean {
         stopDpi()
-        val args = Strategies.args(strategy, PORT)
+        cacheDump?.delete()
+        val args = Strategies.args(strategy, PORT, cacheDump?.absolutePath)
         val worker = thread(name = "byedpi") {
             val code = ByeDpi.run(args)
             if (code != 0) note("byedpi завершился с кодом $code")
@@ -233,12 +243,34 @@ object Engine {
         return false
     }
 
-    fun stopDpi() {
+    /** [noteVideo] — при выключении FiolKid: записать в журнал, что сработало для видео (при подборе — не нужно). */
+    fun stopDpi(noteVideo: Boolean = false) {
         val worker = dpi ?: return
         ByeDpi.stop()
         worker.join(3000)
         dpi = null
         running = null
+        if (noteVideo) noteVideo()
+    }
+
+    /**
+     * Какие варианты сработали для видеосерверов YouTube. byedpi при выключении записывает серверы, где первый
+     * вариант не прошёл, и номер группы, на которой остановился: «IP порт группа время имя».
+     */
+    private fun noteVideo() {
+        val file = cacheDump ?: return
+        val lines = runCatching { file.readLines() }.getOrNull() ?: return
+        val variants = Strategies.videoVariants().map { it.first }
+        val groups = lines.mapNotNull { line ->
+            val parts = line.trim().split(' ')
+            val host = parts.getOrNull(4) ?: return@mapNotNull null
+            if (host != "googlevideo.com" && !host.endsWith(".googlevideo.com")) return@mapNotNull null
+            parts.getOrNull(2)?.toIntOrNull()
+        }
+        if (groups.isEmpty()) return
+        val text = groups.groupingBy { variants.getOrNull(it - 1) ?: "ни один вариант для видео" }.eachCount()
+            .entries.joinToString("; ") { (name, count) -> "$name — $count" }
+        note("Видеосерверы YouTube (сколько серверов каким вариантом): $text")
     }
 
     fun connecting() = show(HomeState(Power.Connecting, HomeState.looks(Look.Checking, Look.Checking, Look.Checking)))
