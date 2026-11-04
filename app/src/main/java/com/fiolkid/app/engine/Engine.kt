@@ -114,9 +114,12 @@ object Engine {
         }
     }
 
-    /** Проверка через текущий byedpi: итог в журнал, время — в «последнюю проверку». */
+    /** Куда отправлять проверки: при работающем VPN по подписке — в sing-box, он сам разложит, иначе в byedpi. */
+    val checkPort get() = if (Vpn.running) Vpn.PORT else PORT
+
+    /** Проверка через текущий способ: итог в журнал, время — в «последнюю проверку». */
     fun check(): CheckResult {
-        val result = Checks.run(PORT)
+        val result = Checks.run(checkPort)
         result.problems.forEach { (service, problems) -> problems.forEach { note("Не прошло: ${service.name}: $it") } }
         _lastCheck.value = LocalDateTime.now()
         return result
@@ -273,7 +276,12 @@ object Engine {
         note("Видеосерверы YouTube (сколько серверов каким вариантом): $text")
     }
 
-    fun connecting() = show(HomeState(Power.Connecting, HomeState.looks(Look.Checking, Look.Checking, Look.Checking)))
+    fun connecting() = show(
+        HomeState(
+            Power.Connecting,
+            HomeState.looks(Look.Checking, Look.Checking, Look.Checking) + (Service.Ai to if (Vpn.hasLink || Vpn.hasKey) Look.Checking else Look.NeedsKey),
+        ),
+    )
 
     fun on(looks: Map<Service, Look>) = show(HomeState(Power.On, HomeState.looks(looks)))
 
@@ -291,6 +299,15 @@ object Engine {
             return Look.NotWorking
         }
         return if (TelegramProxy.state.value.connectedOnce) Look.Working else Look.NeedsConnect
+    }
+
+    /** Карточка VPN: нет ни ключа, ни подписки — «Нужен ключ»; есть — открываются ли нейросети через VPN. */
+    fun vpnLook(): Look {
+        if (!Vpn.hasLink && !Vpn.hasKey) return Look.NeedsKey
+        if (!Vpn.running) return Look.NotWorking
+        val problem = Checks.ai(Vpn.PORT) ?: return Look.Working
+        note("Не прошло: VPN: $problem")
+        return Look.NotWorking
     }
 
     /** Пока идёт замер — заголовок на главной, как на компьютере. */

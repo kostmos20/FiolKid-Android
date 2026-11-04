@@ -25,6 +25,8 @@ import android.content.ActivityNotFoundException
 import android.net.Uri
 import com.fiolkid.app.engine.TrafficMeter
 import com.fiolkid.app.engine.Updater
+import com.fiolkid.app.engine.Vpn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +67,36 @@ class MainActivity : ComponentActivity() {
                 showToast("Перезапускаю прокси Telegram…")
                 FiolVpnService.send(this, FiolVpnService.ACTION_RESTART_TELEGRAM)
             },
+            pasteKey = { paste("Сначала скопируй ключ (vpn://…), потом нажми эту кнопку") },
+            pasteLink = { paste("Сначала скопируй ссылку на подписку (https://…), потом нажми эту кнопку") },
+            deleteKey = {
+                Vpn.deleteKey()
+                showToast("Ключ удалён")
+            },
+            deleteLink = {
+                Vpn.deleteLink()
+                showToast("Подписка удалена")
+                reloadVpn()
+            },
+            setServerAuto = { auto ->
+                val manual = Vpn.state.value.let { s -> s.manual ?: s.servers.firstOrNull { it.score?.works == true }?.key }
+                Vpn.setChoice(auto, if (auto) null else manual)
+                showToast(if (auto) "Буду сам выбирать самый быстрый сервер" else "Выбери сервер в списке")
+                restartSingBox()
+            },
+            pickServer = { key, name ->
+                Vpn.setChoice(false, key)
+                showToast("Подключаюсь через «$name»")
+                restartSingBox()
+            },
+            measureServers = {
+                if (Engine.state.value.power == Power.Off)
+                    lifecycleScope.launch {
+                        val ok = kotlinx.coroutines.withContext(Dispatchers.IO) { Vpn.measure() }
+                        if (ok) showToast("Замер серверов готов")
+                    }
+                else FiolVpnService.send(this, FiolVpnService.ACTION_MEASURE_SERVERS)
+            },
         )
         setContent {
             val state by Engine.state.collectAsState()
@@ -77,6 +109,7 @@ class MainActivity : ComponentActivity() {
                 traffic = TrafficMeter.traffic.collectAsState().value,
                 lastCheck = Engine.lastCheck.collectAsState().value,
                 telegram = TelegramProxy.state.collectAsState().value,
+                vpn = Vpn.state.collectAsState().value,
                 toast = toast.collectAsState().value,
             )
             FiolKidApp(state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, data = data, actions = actions)
@@ -122,6 +155,35 @@ class MainActivity : ComponentActivity() {
         } catch (_: ActivityNotFoundException) {
             showToast("Telegram не установлен")
         }
+    }
+
+    /**
+     * Ключ или подписка из буфера обмена (что именно — видно по тексту), как на компьютере. Буфер после этого
+     * очищаем: ключ не должен там остаться.
+     */
+    private fun paste(empty: String) {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+        if (text.isBlank()) return showToast(empty)
+        showToast("Проверяю…", 20_000)
+        lifecycleScope.launch {
+            val before = Vpn.state.value.let { it.hasLink to it.linkText }
+            val message = kotlinx.coroutines.withContext(Dispatchers.IO) { Vpn.paste(text) }
+            showToast(message, 4000)
+            runCatching { if (Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip() }
+            // Новая подписка — пускаем её в дело
+            if (Vpn.state.value.let { it.hasLink to it.linkText } != before) reloadVpn()
+        }
+    }
+
+    /** Подписка поменялась: если FiolKid включён, служба перезапустит sing-box, не выключая VPN. */
+    private fun reloadVpn() {
+        if (Engine.state.value.power == Power.On) FiolVpnService.send(this, FiolVpnService.ACTION_RELOAD_VPN)
+    }
+
+    /** Сменился выбор сервера: если FiolKid включён — переподключиться к нему. */
+    private fun restartSingBox() {
+        if (Engine.state.value.power == Power.On) FiolVpnService.send(this, FiolVpnService.ACTION_RESTART_SINGBOX)
     }
 
     private fun copyReport() {

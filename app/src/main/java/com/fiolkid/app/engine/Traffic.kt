@@ -17,6 +17,8 @@ object TrafficMeter {
     val traffic: StateFlow<Traffic> = _traffic.asStateFlow()
 
     private var base = 0L
+    /** Сколько насчитали до перезапуска hev-socks5-tunnel в этом включении (после него счётчик снова с нуля). */
+    private var offset = 0L
 
     fun load(context: Context) {
         val total = prefs(context).getLong(KEY_TOTAL, 0)
@@ -26,16 +28,22 @@ object TrafficMeter {
     /** Начало включения: счётчик hev-socks5-tunnel начинается с нуля. */
     fun begin(context: Context) {
         base = prefs(context).getLong(KEY_TOTAL, 0)
+        offset = 0
         _traffic.value = Traffic(0, base)
     }
 
     /** Счётчики hev-socks5-tunnel: [пакеты туда, байты туда, пакеты обратно, байты обратно]. */
     fun update(context: Context, stats: LongArray) {
         if (stats.size < 4) return
-        val session = stats[1] + stats[3]
+        val session = offset + stats[1] + stats[3]
         val total = base + session
         _traffic.value = Traffic(session, total)
         prefs(context).edit().putLong(KEY_TOTAL, total).apply()
+    }
+
+    /** hev-socks5-tunnel перезапущен в том же включении: продолжаем счёт с того, что было. */
+    fun restarted() {
+        offset = _traffic.value.session
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

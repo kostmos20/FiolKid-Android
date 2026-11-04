@@ -10,7 +10,7 @@ import java.time.format.DateTimeFormatter
 
 /**
  * Отчёт для «Скопировать отчёт» и «Отправить»: версия, телефон, состояние, замеры способов и журнал —
- * как в версии для компьютера. Ключей и ссылок в нём нет (их в программе пока и нет).
+ * как в версии для компьютера. Ключей и ссылок в нём нет.
  */
 object Report {
     fun build(context: Context): String {
@@ -31,6 +31,18 @@ object Report {
                     "всего ${tg.total}; в Telegram ${if (tg.connectedOnce) "добавлен" else "не добавлен"}",
             )
             TelegramProxy.routesReport().forEach { appendLine("  $it") }
+            // Как на компьютере: через что VPN, состояние ключа и подписки, выбор сервера — без ссылок и паролей
+            val vpn = Vpn.state.value
+            appendLine(
+                "VPN через: ${if (vpn.running) vpn.profile else "—"}; ${vpn.keyText}; ${vpn.linkText}" +
+                    if (!vpn.supported) " (на этом телефоне VPN недоступен)" else "",
+            )
+            appendLine(
+                "Выбор сервера подписки: ${if (vpn.auto) "самый быстрый" else "вручную"}" +
+                    (if (vpn.chosen.isNotEmpty()) "; подключено через: ${vpn.chosen.joinToString()}" else "") +
+                    (if (Vpn.discordViaVpn) "; Discord — через VPN (запасной режим)" else "") +
+                    (vpn.error?.let { "; ошибка: $it" } ?: ""),
+            )
             appendLine("Через обход: ${formatBytes(traffic.session)} за это включение, ${formatBytes(traffic.total)} за всё время")
             appendLine("Новогоднее оформление: ${yes(options.newYear)}; запуск вместе с телефоном: ${yes(options.autostart)}")
             val results = Engine.results.value

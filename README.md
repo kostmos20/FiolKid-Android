@@ -1,9 +1,10 @@
 # FiolKid для Android
 
-Версия FiolKid для телефонов: одна кнопка «Включить» — и YouTube с Discord снова работают.
+Версия FiolKid для телефонов: одна кнопка «Включить» — и YouTube, Discord и Telegram снова работают.
+С VPN-подпиской через VPN идут ещё звонки Telegram, нейросети и заблокированные сайты.
 Тот же зимний интерфейс, что и в [версии для компьютера](https://github.com/kostmos20/FiolKid).
 
-> Пока это тестовая версия. Работают YouTube и Discord; Telegram и нейросети — скоро.
+> Пока это тестовая версия.
 
 ## Как установить
 
@@ -37,8 +38,12 @@
 |---|---|
 | YouTube, Discord | обход DPI на телефоне: [byedpi](https://github.com/hufrea/byedpi) |
 | Трафик телефона → byedpi | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) |
-| Telegram | скоро: WebSocket-прокси, как tg-ws-proxy в версии для ПК |
-| ИИ-сайты и списки | скоро: AmneziaWG по ключу `vpn://` или подписка |
+| Telegram | свой WebSocket-прокси, как tg-ws-proxy в версии для ПК |
+| VPN по подписке: Telegram со звонками, YouTube, нейросети, заблокированные сайты | [sing-box](https://github.com/SagerNet/sing-box) 1.14.3, тот же, что на ПК: hev-socks5-tunnel отдаёт трафик ему, он раскладывает по спискам между серверами подписки и byedpi |
+
+sing-box (GPL-3.0) — готовая сборка с GitHub: при сборке Gradle сам скачивает её, сверяет SHA-256 и кладёт в
+приложение как `libsingbox.so` (в git не хранится, кэш — `Android/.deps`). Списки адресов — `app/src/main/assets/vpn`,
+те же, что в версии для ПК.
 
 Kotlin + Jetpack Compose. Исходники byedpi и hev-socks5-tunnel (обе под MIT) лежат как есть в `app/src/main/jni`.
 

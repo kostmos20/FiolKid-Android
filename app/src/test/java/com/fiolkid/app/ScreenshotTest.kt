@@ -8,11 +8,30 @@ import com.fiolkid.app.engine.StrategyMode
 import com.fiolkid.app.engine.StrategyResult
 import com.fiolkid.app.engine.Traffic
 import com.fiolkid.app.engine.UpdateState
+import com.fiolkid.app.engine.ServerRow
+import com.fiolkid.app.engine.ServerScore
+import com.fiolkid.app.engine.VpnState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
 import org.junit.Rule
 import org.junit.Test
 import java.time.LocalDateTime
 
 /** Снимки экранов без телефона: gradlew recordPaparazziDebug → app/src/test/snapshots/images. */
+/** Подписка с замеренными серверами — как на компьютере после «Замерить серверы». */
+internal val vpnSample = VpnState(
+    hasLink = true, linkOk = true, linkText = "Подписка «🔥 Quattro VPN»: серверов 5, до 03.12.2026",
+    servers = listOf(
+        ServerRow("a", "🇳🇱 Нидерланды", "vless", ServerScore("a", 84, 37.5, "NL", null)),
+        ServerRow("b", "🇩🇪 Германия", "vless", ServerScore("b", 97, 29.1, "DE", null)),
+        ServerRow("c", "🇫🇮 Финляндия", "hysteria2", ServerScore("c", 112, 18.4, "FI", null)),
+        ServerRow("d", "🇷🇺 Москва", "vless", ServerScore("d", 31, 61.0, "RU", null)),
+        ServerRow("e", "🇵🇱 Польша", "trojan", ServerScore("e", null, null, null, "не отвечает")),
+    ),
+    chosen = listOf("🇳🇱 Нидерланды", "🇩🇪 Германия", "🇫🇮 Финляндия"),
+    running = true, profile = "подписка «🔥 Quattro VPN»",
+)
+
 class ScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5, theme = "android:Theme.Material.NoActionBar")
@@ -55,6 +74,41 @@ class ScreenshotTest {
         FiolKidApp(HomeState(Power.On, looks), "0.6.0", {}, time = 3f, now = now)
     }
 
+    /** С подпиской: все четыре карточки, VPN тоже работает. */
+    @Test
+    fun vpn() = paparazzi.snapshot {
+        val looks = HomeState.looks(Service.entries.associateWith { Look.Working })
+        FiolKidApp(HomeState(Power.On, looks), "0.7.0", {}, time = 3f, now = now)
+    }
+
+    /** Панели 01–03 (ключ, подписка, подключение VPN) крупно — с подпиской и замером серверов. */
+    @Test
+    fun vpnPanels() = paparazzi.snapshot {
+        androidx.compose.runtime.CompositionLocalProvider(LocalUnit provides 393f / 500f) {
+            androidx.compose.foundation.layout.Column(
+                androidx.compose.ui.Modifier.background(androidx.compose.ui.graphics.Color(0xFF1B1D27)).padding(16.u),
+            ) {
+                val data = sample.copy(vpn = vpnSample)
+                SubscriptionPanel(data, AppActions())
+                VpnPanel(HomeState(Power.On), data, AppActions())
+            }
+        }
+    }
+
+    /** Без ключа и подписки. */
+    @Test
+    fun vpnPanelsEmpty() = paparazzi.snapshot {
+        androidx.compose.runtime.CompositionLocalProvider(LocalUnit provides 393f / 500f) {
+            androidx.compose.foundation.layout.Column(
+                androidx.compose.ui.Modifier.background(androidx.compose.ui.graphics.Color(0xFF1B1D27)).padding(16.u),
+            ) {
+                KeyPanel(sample, AppActions())
+                SubscriptionPanel(sample, AppActions())
+                VpnPanel(HomeState(Power.On), sample, AppActions())
+            }
+        }
+    }
+
     @Test
     fun updateLink() = paparazzi.snapshot {
         FiolKidApp(HomeState(), "0.6.0", {}, time = 3f, now = now, data = AppData(update = UpdateState("Вышла версия 0.4.0", Release("0.6.0", "", ""))))
@@ -92,5 +146,13 @@ class TallScreenshotTest {
         val base = ScreenshotTest().sample
         val data = base.copy(update = UpdateState("Вышла версия 0.3.2", Release("0.3.2", "", notes)))
         FiolKidApp(HomeState(Power.On, HomeState.looks(Look.Working, Look.Working, Look.Working)), "0.3.1", {}, time = 3f, initialTab = Tab.Settings, data = data)
+    }
+
+    /** Настройки с добавленной подпиской. */
+    @Test
+    fun settingsVpn() = paparazzi.snapshot {
+        val data = ScreenshotTest().sample.copy(vpn = vpnSample)
+        val looks = HomeState.looks(Service.entries.associateWith { Look.Working })
+        FiolKidApp(HomeState(Power.On, looks), "0.7.0", {}, time = 3f, initialTab = Tab.Settings, data = data)
     }
 }

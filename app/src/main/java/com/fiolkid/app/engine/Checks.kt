@@ -17,8 +17,9 @@ data class CheckResult(val problems: Map<Service, List<String>>, val passed: Int
 }
 
 /**
- * Проверка доступа, как в версии для компьютера: открывается ли сайт сервиса через byedpi. Само приложение
- * в VPN не входит (иначе byedpi отправлял бы свои соединения сам себе), поэтому проверяем прямо через его SOCKS-порт.
+ * Проверка доступа, как в версии для компьютера: открывается ли сайт сервиса через byedpi (или через sing-box,
+ * если есть подписка: он сам решит, что пустить через VPN). Само приложение в VPN не входит (иначе byedpi
+ * отправлял бы свои соединения сам себе), поэтому проверяем прямо через SOCKS-порт.
  * Все адреса проверяются одновременно; время — пока не ответит последний.
  */
 object Checks {
@@ -71,6 +72,34 @@ object Checks {
             "$host: ${if ("timeout" in reason.lowercase() || "timed out" in reason) "нет ответа за ${TIMEOUT_MS / 1000} с" else reason}"
         }
     }
+
+    /** Страны, из которых нейросети не пускают (как AiBlockedCountries на компьютере). */
+    internal val aiBlocked = setOf("RU", "BY", "CN", "HK", "MO", "IR", "KP", "CU", "SY")
+
+    /**
+     * Нейросети через VPN: ChatGPT за Cloudflare, и /cdn-cgi/trace говорит, из какой страны пришёл запрос.
+     * Null — открылся и страна подходит; иначе — что не так.
+     */
+    fun ai(port: Int?): String? = try {
+        val proxy = if (port == null) Proxy.NO_PROXY else Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+        val connection = URL("https://chatgpt.com/cdn-cgi/trace").openConnection(proxy) as HttpsURLConnection
+        connection.connectTimeout = TIMEOUT_MS
+        connection.readTimeout = TIMEOUT_MS
+        try {
+            val trace = connection.inputStream.bufferedReader().readText()
+            val country = parseCountry(trace)
+            if (country != null && country !in aiBlocked) null
+            else "chatgpt.com видит запрос из страны ${country ?: "?"} — сервер VPN в этой стране или запрос прошёл мимо VPN"
+        } finally {
+            connection.disconnect()
+        }
+    } catch (e: Exception) {
+        val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+        "chatgpt.com: ${if ("timeout" in reason.lowercase() || "timed out" in reason) "нет ответа за ${TIMEOUT_MS / 1000} с" else reason}"
+    }
+
+    internal fun parseCountry(trace: String) =
+        trace.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')?.trim()?.uppercase()?.ifEmpty { null }
 
     /** WebSocket к gateway Discord: проходит, если сервер прислал первое сообщение (HELLO, op 10). */
     private fun gateway(url: String, port: Int?): String? {

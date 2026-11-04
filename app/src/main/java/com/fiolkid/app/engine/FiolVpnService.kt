@@ -23,7 +23,8 @@ import java.io.File
 
 /**
  * VPN-режим Android: весь трафик телефона идёт в наш интерфейс, оттуда hev-socks5-tunnel отдаёт соединения
- * в byedpi, а byedpi выпускает их в интернет, запутывая DPI. Само приложение в VPN не входит — иначе byedpi
+ * в byedpi, а byedpi выпускает их в интернет, запутывая DPI. С подпиской между ними — sing-box ([Vpn]):
+ * Telegram, YouTube, нейросети и заблокированные сайты он отправляет через серверы VPN. Само приложение в VPN не входит — иначе byedpi
  * отправлял бы свои же соединения по кругу.
  *
  * Все действия (включить, выключить, проверить, замерить, сменить способ) идут через одну очередь, чтобы
@@ -37,6 +38,10 @@ class FiolVpnService : VpnService() {
         const val ACTION_BENCHMARK = "com.fiolkid.app.BENCHMARK"
         const val ACTION_APPLY = "com.fiolkid.app.APPLY"
         const val ACTION_RESTART_TELEGRAM = "com.fiolkid.app.RESTART_TELEGRAM"
+        const val ACTION_RELOAD_VPN = "com.fiolkid.app.RELOAD_VPN"
+        /** Сменился выбор сервера: перезапустить только sing-box. */
+        const val ACTION_RESTART_SINGBOX = "com.fiolkid.app.RESTART_SINGBOX"
+        const val ACTION_MEASURE_SERVERS = "com.fiolkid.app.MEASURE_SERVERS"
         const val EXTRA_STRATEGY = "strategy"
 
         /** Проверка, пока включено, — раз в 5 минут; после двух неудач подряд подбираем способ заново. */
@@ -58,6 +63,11 @@ class FiolVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val strategy = intent?.getStringExtra(EXTRA_STRATEGY)
+        // Замер серверов долгий — не в общей очереди, чтобы не задерживать проверки и переключения
+        if (intent?.action == ACTION_MEASURE_SERVERS) {
+            measureServers()
+            return START_NOT_STICKY
+        }
         scope.launch {
             lock.withLock {
                 safely {
@@ -67,6 +77,8 @@ class FiolVpnService : VpnService() {
                         ACTION_BENCHMARK -> benchmark()
                         ACTION_APPLY -> apply(strategy)
                         ACTION_RESTART_TELEGRAM -> restartTelegram()
+                        ACTION_RELOAD_VPN -> reloadSubscription()
+                        ACTION_RESTART_SINGBOX -> restartSingBox()
                         // Без действия запускает сама система: «Постоянная VPN» в настройках телефона
                         else -> start()
                     }
@@ -127,21 +139,10 @@ class FiolVpnService : VpnService() {
         if (descriptor == null) return stop()
         tun = descriptor
 
-        val config = File(filesDir, "tunnel.yml")
-        config.writeText(
-            """
-            tunnel:
-              mtu: 8500
-            socks5:
-              port: ${Engine.PORT}
-              address: 127.0.0.1
-              udp: 'udp'
-            misc:
-              task-stack-size: 81920
-            """.trimIndent(),
-        )
+        Engine.step("запуск VPN по подписке")
+        startSubscription()
         Engine.step("запуск перенаправителя трафика")
-        if (!Tunnel.TProxyStartService(config.absolutePath, descriptor.fd)) {
+        if (!startTunnel()) {
             Engine.note("Не запустился перенаправитель трафика")
             stop()
             return
@@ -149,12 +150,109 @@ class FiolVpnService : VpnService() {
         Engine.note("VPN включён")
         Engine.step("работа")
         pickedPassed = result.passed
-        Engine.on(result.looks + (Service.Telegram to Engine.telegramLook()))
+        // С подпиской YouTube идёт через VPN: проверка выше была через byedpi, перепроверяем как есть
+        val first = if (Vpn.running) Engine.check() else result
+        Engine.on(first.looks + extraLooks())
+        discordFallback(first)
+        // Как на компьютере: выбор «самый быстрый» — серверы меряем (в фоне, уже подключившись) и берём лучшие
+        if (Vpn.measureDue) measureServers()
         if (result.allPassed) Engine.note("Все проверки прошли")
         failures = 0
         watchTraffic()
         watch()
     }
+
+    /**
+     * hev-socks5-tunnel: пакеты из VPN-интерфейса — соединениями в SOCKS. С подпиской — в sing-box (он раскладывает
+     * между VPN и byedpi), без неё — прямо в byedpi.
+     */
+    private fun startTunnel(): Boolean {
+        val descriptor = tun ?: return false
+        val config = File(filesDir, "tunnel.yml")
+        config.writeText(
+            """
+            tunnel:
+              mtu: 8500
+            socks5:
+              port: ${if (Vpn.running) Vpn.PORT else Engine.PORT}
+              address: 127.0.0.1
+              udp: 'udp'
+            misc:
+              task-stack-size: 81920
+            """.trimIndent(),
+        )
+        return Tunnel.TProxyStartService(config.absolutePath, descriptor.fd)
+    }
+
+    /** sing-box по подписке, если она есть; не запустился — работаем как без неё. */
+    private fun startSubscription() {
+        TelegramProxy.vpnPort = null
+        if (!Vpn.hasLink) return
+        // Список серверов — сохранённый: обновляется потом, в проверке (иначе телефон ждал бы без интернета)
+        val ok = Vpn.start(Engine.PORT, networkDns())
+        if (ok) TelegramProxy.vpnPort = Vpn.PORT
+        else Engine.note("VPN по подписке не запустился — Telegram и YouTube пока через обход")
+    }
+
+    /** Новый выбор сервера (или запасной режим Discord): перезапускаем sing-box на том же порту, hev не трогаем. */
+    private fun restartSingBox() {
+        if (tun == null || !Vpn.canConnect) return
+        if (!Vpn.running) return reloadSubscription()
+        if (!Vpn.start(Engine.PORT, networkDns())) {
+            // Не поднялся — работаем без VPN, пока не починится
+            reloadSubscription()
+            return
+        }
+        Engine.on(Engine.check().looks + extraLooks())
+    }
+
+    /** Замер серверов в фоне; если включено — потом переподключаемся к лучшим. */
+    private fun measureServers() {
+        scope.launch {
+            if (!Vpn.measure()) return@launch
+            lock.withLock { safely { if (Vpn.running) restartSingBox() } }
+        }
+    }
+
+    /**
+     * Запасной режим, как на компьютере: Discord через обход не открылся, а VPN есть — пускаем Discord через VPN
+     * (до выключения FiolKid).
+     */
+    private fun discordFallback(result: CheckResult) {
+        if (!Vpn.running || Vpn.discordViaVpn || result.problems[Service.Discord].isNullOrEmpty() || result.passed == 0) return
+        Engine.note("Discord через обход не открылся — пускаю его через VPN (запасной режим)")
+        Vpn.discordViaVpn = true
+        restartSingBox()
+    }
+
+    /** DNS сети телефона (Wi-Fi или мобильной) — через него sing-box узнаёт адреса серверов подписки. */
+    private fun networkDns(): String? = runCatching {
+        val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+        val network = connectivity.activeNetwork ?: return null
+        connectivity.getLinkProperties(network)?.dnsServers.orEmpty()
+            .firstOrNull { it is java.net.Inet4Address }?.hostAddress
+    }.getOrNull()
+
+    /**
+     * Подписку добавили или убрали, пока FiolKid включён: перезапускаем sing-box и перенаправитель
+     * трафика, не выключая VPN (на пару секунд соединения прервутся).
+     */
+    private fun reloadSubscription() {
+        if (tun == null) return
+        runCatching { TrafficMeter.update(this, Tunnel.TProxyGetStats()) }
+        TrafficMeter.restarted()
+        runCatching { Tunnel.TProxyStopService() }
+        Vpn.stop()
+        startSubscription()
+        if (!startTunnel()) {
+            Engine.note("Не запустился перенаправитель трафика")
+            return stop()
+        }
+        Engine.on(Engine.check().looks + extraLooks())
+    }
+
+    /** Карточки, которые не зависят от способа обхода: Telegram (наш прокси) и VPN. */
+    private fun extraLooks() = mapOf(Service.Telegram to Engine.telegramLook(), Service.Ai to Engine.vpnLook())
 
     /** Раз в 2 секунды — сколько прошло через обход: в уведомление. */
     private fun watchTraffic() {
@@ -188,8 +286,18 @@ class FiolVpnService : VpnService() {
             return
         }
         if (byUser) Engine.note("Проверяю по просьбе")
+        // sing-box мог упасть — тогда поднимаем его заново вместе с перенаправителем; раз в 6 часов — новый список серверов
+        if (Vpn.canConnect && !Vpn.running) {
+            Engine.note("VPN по подписке не работает — перезапускаю")
+            reloadSubscription()
+            if (tun == null) return
+        } else if (!byUser && Vpn.refreshIfDue()) {
+            reloadSubscription()
+            if (tun == null) return
+        }
         val result = Engine.check()
-        Engine.on(result.looks + (Service.Telegram to Engine.telegramLook()))
+        Engine.on(result.looks + extraLooks())
+        discordFallback(result)
         if (result.allPassed) {
             failures = 0
             Engine.note("Все проверки прошли")
@@ -199,6 +307,11 @@ class FiolVpnService : VpnService() {
         Engine.note("Проверка не прошла ($failures из 2)")
         if (failures < 2) return
         failures = 0
+        // Не открылось вообще ничего — скорее всего, нет сети или телефон спит и не пускает в сеть: способ ни при чём
+        if (result.passed == 0) {
+            Engine.note("Не открылось ничего — похоже, нет сети или телефон спит; способ не меняю")
+            return
+        }
         // Перебор способов идёт прямо на рабочем соединении и рвёт его — только если стало хуже, чем при выборе
         if (result.passed >= pickedPassed) {
             Engine.note("Открылось столько же, сколько при выборе способа (${result.passed} из ${result.total}) — способ не меняю")
@@ -211,7 +324,7 @@ class FiolVpnService : VpnService() {
         Engine.step("работа")
         pickedPassed = picked.second.passed
         Engine.note("Работаю со способом «${picked.first.name}»")
-        Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
+        Engine.on((if (Vpn.running) Engine.check().looks else picked.second.looks) + extraLooks())
     }
 
     /** Прокси Telegram работает, пока включён FiolKid; первое подключение Telegram сразу зажигает карточку. */
@@ -246,17 +359,18 @@ class FiolVpnService : VpnService() {
         if (picked == null) return stop()
         pickedPassed = picked.second.passed
         Engine.note("Работаю со способом «${picked.first.name}»")
-        Engine.on(picked.second.looks + (Service.Telegram to Engine.telegramLook()))
+        Engine.on((if (Vpn.running) Engine.check().looks else picked.second.looks) + extraLooks())
     }
 
     private fun apply(name: String?) {
         val strategy = Strategies.all.firstOrNull { it.name == name } ?: return
         if (tun == null) return
-        val telegram = Engine.state.value.looks.getValue(Service.Telegram)
+        val looks = Engine.state.value.looks
         Engine.connecting()
         val result = Engine.apply(strategy) ?: return stop()
         pickedPassed = result.passed
-        Engine.on(result.looks + (Service.Telegram to telegram))
+        val now = if (Vpn.running) Engine.check().looks else result.looks
+        Engine.on(now + (Service.Telegram to looks.getValue(Service.Telegram)) + (Service.Ai to looks.getValue(Service.Ai)))
     }
 
     private fun stop() {
@@ -265,11 +379,14 @@ class FiolVpnService : VpnService() {
         watchdog?.cancel()
         watchdog = null
         TelegramProxy.stop()
+        TelegramProxy.vpnPort = null
         if (tun != null) {
             runCatching { TrafficMeter.update(this, Tunnel.TProxyGetStats()) }
             runCatching { Tunnel.TProxyStopService() }
             tun?.close()
             tun = null
+            Vpn.stop()
+            Vpn.discordViaVpn = false
             Engine.note("Выключено. Через обход прошло ${formatBytes(TrafficMeter.traffic.value.session)}")
         }
         Engine.stopDpi(noteVideo = true)

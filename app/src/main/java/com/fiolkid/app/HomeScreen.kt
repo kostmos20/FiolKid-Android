@@ -275,6 +275,8 @@ private fun Services(state: HomeState, actions: AppActions) {
                     val look = state.looks.getValue(service)
                     // Как на компьютере: Telegram не добавил прокси — «Подключить», прокси не работает — «Перезапустить»
                     val (action, onAction) = when {
+                        // Как на компьютере: ни ключа, ни подписки — «Вставить ключ» (подходит и ссылка-подписка)
+                        service == Service.Ai && look == Look.NeedsKey -> "Вставить ключ" to actions.pasteKey
                         service != Service.Telegram -> null to {}
                         look == Look.NeedsConnect -> "Подключить" to actions.connectTelegram
                         look == Look.NotWorking -> "Перезапустить" to actions.restartTelegram

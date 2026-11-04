@@ -18,7 +18,7 @@ enum class Service(
 
 /**
  * Как выглядит карточка сервиса. NeedsConnect — прокси Telegram работает, но в Telegram его ещё не добавили;
- * Soon — в версии для телефона ещё не сделано.
+ * NeedsKey — для VPN нужна ссылка-подписка; Soon — в версии для телефона ещё не сделано.
  */
 enum class Look { Off, Checking, Working, NotWorking, NeedsKey, NeedsConnect, Soon }
 
@@ -32,14 +32,16 @@ data class HomeState(
     val measuring: Pair<Int, Int>? = null,
 ) {
     companion object {
-        /** Карточки по результатам проверки; чего нет в [known] (нейросети на телефоне пока) — «Скоро». */
-        fun looks(known: Map<Service, Look>) = Service.entries.associateWith { known[it] ?: Look.Soon }
+        /** Карточки по результатам проверки; чего нет в [known] — «Скоро», а VPN без подписки — «Нужен ключ». */
+        fun looks(known: Map<Service, Look>) =
+            Service.entries.associateWith { known[it] ?: if (it == Service.Ai) Look.NeedsKey else Look.Soon }
 
         fun looks(youTube: Look, discord: Look, telegram: Look = Look.Soon) =
             looks(mapOf(Service.YouTube to youTube, Service.Discord to discord, Service.Telegram to telegram))
     }
 
-    private val problems get() = looks.values.count { it == Look.NotWorking || it == Look.NeedsKey || it == Look.NeedsConnect }
+    // «Нужен ключ» — не поломка: без подписки VPN просто нет
+    private val problems get() = looks.values.count { it == Look.NotWorking || it == Look.NeedsConnect }
     private val checking get() = looks.values.any { it == Look.Checking }
 
     val headline: Pair<String, String>

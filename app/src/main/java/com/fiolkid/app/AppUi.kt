@@ -6,6 +6,7 @@ import com.fiolkid.app.engine.StrategyResult
 import com.fiolkid.app.engine.TelegramState
 import com.fiolkid.app.engine.Traffic
 import com.fiolkid.app.engine.UpdateState
+import com.fiolkid.app.engine.VpnState
 import java.time.LocalDateTime
 
 /** Всё, что экрану нужно знать, кроме главного состояния: журнал, настройки, замеры, обновления. */
@@ -18,6 +19,7 @@ data class AppData(
     val traffic: Traffic = Traffic(),
     val lastCheck: LocalDateTime? = null,
     val telegram: TelegramState = TelegramState(),
+    val vpn: VpnState = VpnState(),
     /** Всплывающая подсказка снизу («Отчёт скопирован» и т. п.). */
     val toast: String? = null,
 )
@@ -36,4 +38,13 @@ class AppActions(
     val installUpdate: () -> Unit = {},
     val connectTelegram: () -> Unit = {},
     val restartTelegram: () -> Unit = {},
+    /** Ключ Amnezia и подписка — из буфера обмена, как «Вставить ключ» и «Вставить ссылку» на компьютере. */
+    val pasteKey: () -> Unit = {},
+    val pasteLink: () -> Unit = {},
+    val deleteKey: () -> Unit = {},
+    val deleteLink: () -> Unit = {},
+    val setServerAuto: (Boolean) -> Unit = {},
+    /** Выбрать сервер подписки вручную: ключ и имя (для подсказки). */
+    val pickServer: (String, String) -> Unit = { _, _ -> },
+    val measureServers: () -> Unit = {},
 )

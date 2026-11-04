@@ -74,6 +74,7 @@ object Icons {
     const val Key = "M13 9a5 5 0 1 1-10 0a5 5 0 1 1 10 0ZM12 13l8 8m-4-4 3-3m-6 0 3-3"
     const val Arrow = "m9 5 7 7-7 7"
     const val Telegram = "m3 14 26-10-6 25-9-8-6 4 2-8zm7 3L24 9 14 21"
+    const val Link = "M11.5 11.9 14.9 8.5M8.9 13.6l-1.7 1.7a3.4 3.4 0 0 1-5.1-5.1l3.4-3.4a3.4 3.4 0 0 1 5.1 0M12.3 13.6a3.4 3.4 0 0 0 5.1 0l3.4-3.4a3.4 3.4 0 0 0-5.1-5.1l-1.7 1.7"
 }
 
 /** Значок-контур из строки SVG, растянутый по размеру значка (как Stretch=Uniform); толщина — в единицах экрана. */
@@ -186,10 +187,12 @@ fun FiolButton(
     icon: String? = null,
     gold: Boolean = false,
     enabled: Boolean = true,
+    /** «Удалить» (стиль DangerButton): красноватая подпись и рамка. */
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(11.u)
-    val content = if (gold) Color(0xFF191B22) else Color(0xFFE4E1DF)
+    val content = if (gold) Color(0xFF191B22) else if (danger) Palette.RedText else Color(0xFFE4E1DF)
     Row(
         modifier.heightIn(min = 36.u).alpha(if (enabled) 1f else 0.5f)
             .background(
@@ -197,7 +200,7 @@ fun FiolButton(
                 else Brush.linearGradient(listOf(Color(0xD944434B), Color(0xE633363F))),
                 shape,
             )
-            .border(1.dp, if (gold) Color(0x5CDCC095) else Color(0x2CC5B69F), shape)
+            .border(1.dp, if (gold) Color(0x5CDCC095) else if (danger) Color(0x40E39A8E) else Color(0x2CC5B69F), shape)
             .then(Tap(onClick, enabled))
             .padding(horizontal = 13.u, vertical = 8.u),
         verticalAlignment = Alignment.CenterVertically,

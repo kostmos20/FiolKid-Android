@@ -79,6 +79,10 @@ object TelegramProxy {
     @Volatile
     var socksPort: Int? = null
 
+    /** Порт sing-box, если работает VPN по подписке: через него Telegram идёт через VPN — первым путём. */
+    @Volatile
+    var vpnPort: Int? = null
+
     /** Каким путём в последний раз дошли до каждого DC: полное название и вид. */
     private val best = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val kinds = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -289,6 +293,9 @@ object TelegramProxy {
      * Один из путей к DC: полное название (в отчёт), вид пути (в журнал — только когда вид меняется),
      * домен Cloudflare, если это он, и как его открыть.
      */
+    /** Как выходить к Telegram, по порядку: через VPN (если есть подписка), через обход, напрямую. */
+    private fun ways() = listOfNotNull(vpnPort?.let { "через VPN" to it }, socksPort?.let { "через обход" to it }, "напрямую" to null)
+
     private class Route(val name: String, val kind: String, val cf: String?, val open: (timeoutMs: Int) -> TgWebSocket)
 
     /**
@@ -300,7 +307,7 @@ object TelegramProxy {
     private fun routes(dc: Int, media: Boolean, test: Boolean): List<Route> {
         val path = if (test) "/apiws_test" else "/apiws"
         val key = key(dc, media)
-        val ways = listOfNotNull(socksPort?.let { "через обход" to it }, "напрямую" to null)
+        val ways = ways()
         val kws = mutableListOf<Route>()
         DIRECT[dc]?.let { target ->
             val domains = if (media) listOf("kws$dc-1.web.telegram.org", "kws$dc.web.telegram.org") else listOf("kws$dc.web.telegram.org")
@@ -470,7 +477,7 @@ object TelegramProxy {
     private fun tcpFallback(client: Socket, input: InputStream, dc: Int, media: Boolean, test: Boolean, relayInit: ByteArray, crypto: Crypto) {
         val ip = (if (test) DC_TEST_IPS else DC_IPS)[dc] ?: return
         var opened: Socket? = null
-        for ((way, port) in listOfNotNull(socksPort?.let { "через обход" to it }, "напрямую" to null)) {
+        for ((way, port) in ways()) {
             val socket = openSocket(port)
             try {
                 socket.connect(InetSocketAddress(ip, 443), ATTEMPT_MS)

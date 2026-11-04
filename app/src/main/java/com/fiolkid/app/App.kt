@@ -6,6 +6,7 @@ import com.fiolkid.app.engine.Options
 import com.fiolkid.app.engine.TelegramProxy
 import com.fiolkid.app.engine.TrafficMeter
 import com.fiolkid.app.engine.Updater
+import com.fiolkid.app.engine.Vpn
 import java.io.File
 
 /**
@@ -19,6 +20,7 @@ class App : Application() {
         Engine.init(this)
         TrafficMeter.load(this)
         TelegramProxy.load(this)
+        Vpn.init(this)
         Engine.noteUnexpectedClose(updated = Updater.noteVersion(this, BuildConfig.VERSION_NAME))
         val crash = File(filesDir, "crash.txt")
         if (crash.exists()) {
