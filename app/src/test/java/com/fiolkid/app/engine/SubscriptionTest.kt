@@ -125,13 +125,30 @@ class SubscriptionTest {
             d.key to ServerScore(d.key, 90, 20.0, "DE", null),
             e.key to ServerScore(e.key, null, null, null, "не отвечает"),
         )
-        assertEquals(listOf(a, d, c), Vpn.pick(servers, scores, auto = true, manual = null))
+        // c — Hysteria2: на телефоне его не берём, пока отвечают серверы по TCP
+        assertEquals(listOf(a, d), Vpn.pick(servers, scores, auto = true, manual = null))
         assertEquals(listOf(b), Vpn.pick(servers, scores, auto = false, manual = b.key))
         // Без замера — все (sing-box выберет сам)
         assertEquals(servers.toSet(), Vpn.pick(servers, emptyMap(), auto = true, manual = null).toSet())
         val line = scores.getValue(a.key).line()
         assertEquals(scores[a.key], ServerScore.parse(line))
         assertEquals("80 мс · 30.0 Мбит/с · NL", scores.getValue(a.key).text)
+    }
+
+    /** Hysteria2 (UDP) — только если серверы по TCP не отвечают, даже если на замере он быстрее. */
+    @Test
+    fun tcpServersBeforeHysteria() {
+        val servers = SubscriptionParser.parse(links.joinToString("\n")).servers
+        val (a, _, c, d) = servers // c — hysteria2
+        val scores = mapOf(
+            a.key to ServerScore(a.key, 150, 10.0, "NL", null),
+            c.key to ServerScore(c.key, 40, 90.0, "FI", null),
+            d.key to ServerScore(d.key, 160, 8.0, "DE", null),
+        )
+        assertEquals(listOf(a, d), Vpn.pick(servers, scores, auto = true, manual = null))
+        val onlyHy = mapOf(c.key to ServerScore(c.key, 40, 90.0, "FI", null), a.key to ServerScore(a.key, null, null, null, "не отвечает"))
+        assertEquals(listOf(c), Vpn.pick(servers, onlyHy, auto = true, manual = null))
+        assertEquals(listOf(c), Vpn.pick(servers, scores, auto = false, manual = c.key))
     }
 
     @Test

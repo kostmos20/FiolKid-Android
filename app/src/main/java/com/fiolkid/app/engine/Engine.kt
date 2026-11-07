@@ -86,7 +86,7 @@ object Engine {
      */
     fun noteUnexpectedClose(updated: Boolean) {
         val step = prefs.getString(KEY_STEP, null) ?: return
-        if (!updated) note("Прошлый раз программа закрылась сама, не выключившись (шаг: $step) — её мог остановить телефон или сбой")
+        if (!updated) note("Прошлый раз программа закрылась сама, не выключившись (шаг: $step) — её мог остановить телефон или сбой. Если это повторяется — разреши FiolKid работу в фоне: «Настройки» → «Оформление и запуск»")
         step(null)
     }
 

@@ -58,6 +58,7 @@ class FiolVpnService : VpnService() {
     private var meter: Job? = null
     private var watchdog: Job? = null
     private var failures = 0
+    private var vpnFailures = 0
     /** Сколько адресов открылось, когда способ выбирали: хуже не стало — подбирать заново незачем. */
     private var pickedPassed = 0
 
@@ -251,6 +252,23 @@ class FiolVpnService : VpnService() {
         Engine.on(Engine.check().looks + extraLooks())
     }
 
+    /**
+     * Серверы подписки перестали отвечать (VPN и YouTube через него не открылись две проверки подряд, а что-то
+     * другое открылось — значит, сеть есть): замеряем серверы заново и переходим на рабочие, не дожидаясь срока.
+     */
+    private fun vpnWatch(result: CheckResult, extra: Map<Service, Look>) {
+        val bad = Vpn.running && Vpn.state.value.auto &&
+            (extra[Service.Ai] == Look.NotWorking || !result.problems[Service.YouTube].isNullOrEmpty())
+        if (!bad || result.passed == 0) {
+            if (!bad) vpnFailures = 0
+            return
+        }
+        if (++vpnFailures < 2) return
+        vpnFailures = 0
+        Engine.note("Серверы подписки не отвечают две проверки подряд — замеряю их заново")
+        measureServers()
+    }
+
     /** Карточки, которые не зависят от способа обхода: Telegram (наш прокси) и VPN. */
     private fun extraLooks() = mapOf(Service.Telegram to Engine.telegramLook(), Service.Ai to Engine.vpnLook())
 
@@ -296,8 +314,10 @@ class FiolVpnService : VpnService() {
             if (tun == null) return
         }
         val result = Engine.check()
-        Engine.on(result.looks + extraLooks())
+        val extra = extraLooks()
+        Engine.on(result.looks + extra)
         discordFallback(result)
+        vpnWatch(result, extra)
         if (result.allPassed) {
             failures = 0
             Engine.note("Все проверки прошли")

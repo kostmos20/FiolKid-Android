@@ -164,7 +164,15 @@ private fun LookPanel(data: AppData, actions: AppActions) {
             "Запускать вместе с телефоном", "Обход включится сам после перезагрузки",
             data.options.autostart, Modifier.padding(top = 12.u), actions.setAutostart,
         )
-        Caption("На Xiaomi, Huawei и Honor ещё нужно разрешить FiolKid автозапуск в настройках телефона.")
+        Box(Modifier.padding(top = 14.u).fillMaxWidth().height(1.dp).background(Color(0x0BFFFFFF)))
+        Hint(
+            if (data.xiaomi) "Xiaomi сам закрывает программы в фоне — и FiolKid тоже. В настройках FiolKid включи " +
+                "«Автозапуск», а в «Контроле активности» выбери «Нет ограничений»."
+            else "Если телефон сам закрывает FiolKid, в настройках программы разреши ей автозапуск и работу в фоне " +
+                "без ограничений (на Xiaomi, Huawei и Honor это обязательно).",
+            Modifier.padding(top = 2.u),
+        )
+        FiolButton("Открыть настройки FiolKid", Modifier.padding(top = 14.u), onClick = actions.openAppSettings)
     }
 }
 
@@ -299,7 +307,7 @@ internal fun SubscriptionPanel(data: AppData, actions: AppActions) {
                 when {
                     vpn.measuring -> "Замеряю: задержку, скорость скачивания и страну выхода каждого сервера…"
                     vpn.auto -> (if (vpn.chosen.isNotEmpty()) "Сейчас через: ${vpn.chosen.joinToString()}. " else "") +
-                        "Перед подключением программа меряет все серверы и берёт самые быстрые. Серверы с выходом из России для нейросетей не берёт."
+                        "Перед подключением программа меряет все серверы и берёт самые быстрые — сначала по TCP: Hysteria2 мобильные операторы часто режут. Серверы с выходом из России для нейросетей не берёт."
                     else -> "Подключаюсь только к выбранному серверу. Нажми на другой, чтобы сменить."
                 },
                 Modifier.padding(bottom = 4.u),

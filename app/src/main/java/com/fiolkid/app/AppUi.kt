@@ -22,6 +22,8 @@ data class AppData(
     val vpn: VpnState = VpnState(),
     /** Всплывающая подсказка снизу («Отчёт скопирован» и т. п.). */
     val toast: String? = null,
+    /** Телефон Xiaomi (Redmi, POCO): подсказать, где разрешить работу в фоне. */
+    val xiaomi: Boolean = false,
 )
 
 /** Что делать по кнопкам. По умолчанию — ничего (для снимков экрана). */
@@ -47,4 +49,6 @@ class AppActions(
     /** Выбрать сервер подписки вручную: ключ и имя (для подсказки). */
     val pickServer: (String, String) -> Unit = { _, _ -> },
     val measureServers: () -> Unit = {},
+    /** Настройки FiolKid в Android — автозапуск и работа в фоне. */
+    val openAppSettings: () -> Unit = {},
 )

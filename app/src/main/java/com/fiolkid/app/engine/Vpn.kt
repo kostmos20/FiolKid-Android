@@ -260,6 +260,11 @@ object Vpn {
         publish()
         return try {
             val scores = ServerBenchmark(exe, files).run(servers)
+            // Не ответил ни один — скорее всего, пропала сеть: прошлый замер полезнее
+            if (scores.none { it.works }) {
+                Engine.note("Замер серверов: не ответил ни один из ${scores.size} — похоже, нет сети; оставляю прошлый замер")
+                return false
+            }
             prefs.edit().putStringSet("scores", scores.map { it.line() }.toSet()).putLong("scoresAt", System.currentTimeMillis()).apply()
             val best = scores.filter { it.works }.maxByOrNull { it.score }
             Engine.note("Замер серверов: отвечают ${scores.count { it.works }} из ${scores.size}" +
@@ -274,12 +279,16 @@ object Vpn {
         }
     }
 
-    /** Через какие серверы подключаться: выбранный вручную, три лучших по замеру или все (sing-box выберет сам). */
+    /**
+     * Через какие серверы подключаться: выбранный вручную, три лучших по замеру или все (sing-box выберет сам).
+     * На телефоне сначала серверы по TCP (VLESS, Trojan, Shadowsocks): Hysteria2 идёт по UDP, а его мобильные
+     * операторы режут — на замере он быстрый, а через полчаса не отвечает. Hysteria2 — только если TCP не отвечают.
+     */
     internal fun pick(servers: List<ProxyServer>, scores: Map<String, ServerScore>, auto: Boolean, manual: String?): List<ProxyServer> {
         if (!auto) servers.firstOrNull { it.key == manual }?.let { return listOf(it) }
         val working = servers.filter { scores[it.key]?.works == true }.sortedByDescending { scores.getValue(it.key).score }
-        val good = working.filter { !scores.getValue(it.key).badCountry }
-        val best = (good.ifEmpty { working }).take(BEST)
+        val good = working.filter { !scores.getValue(it.key).badCountry }.ifEmpty { working }
+        val best = good.filter { !it.udp }.ifEmpty { good }.take(BEST)
         return best.ifEmpty { select(servers) }
     }
 

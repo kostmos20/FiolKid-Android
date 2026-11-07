@@ -13,6 +13,9 @@ data class ProxyServer(val protocol: String, val host: String, val port: Int, va
             else -> 3
         }
 
+    /** Hysteria2 работает по UDP (QUIC): на мобильной сети его часто режут. */
+    val udp get() = protocol == "hysteria2"
+
     /** Постоянный отпечаток сервера — чтобы запомнить его, не храня адрес открыто. */
     val key: String
         get() = MessageDigest.getInstance("SHA-256").digest("$protocol|$host|$port|$name".toByteArray())

@@ -76,9 +76,9 @@ class ServerBenchmark(private val exe: File, private val dir: File) {
             } finally {
                 pool.shutdownNow()
             }
-            // Скорость — у лучших по задержке, по очереди; из «плохих» стран — в последнюю очередь
+            // Скорость — у лучших по задержке, по очереди; из «плохих» стран и Hysteria2 (UDP) — в последнюю очередь
             scores.withIndex().filter { it.value.works }
-                .sortedWith(compareBy({ it.value.badCountry }, { it.value.pingMs }))
+                .sortedWith(compareBy({ it.value.badCountry }, { list[it.index].udp }, { it.value.pingMs }))
                 .take(SPEED_TEST_COUNT)
                 .forEach { (i, score) -> scores[i] = score.copy(mbps = speed(ports[i])) }
             return scores

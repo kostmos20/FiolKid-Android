@@ -97,6 +97,12 @@ class MainActivity : ComponentActivity() {
                     }
                 else FiolVpnService.send(this, FiolVpnService.ACTION_MEASURE_SERVERS)
             },
+            openAppSettings = {
+                // Здесь у Xiaomi «Автозапуск» и «Контроль активности», у остальных — «Батарея»
+                runCatching {
+                    startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }.onFailure { showToast("Не получилось открыть настройки — найди FiolKid в «Приложениях»") }
+            },
         )
         setContent {
             val state by Engine.state.collectAsState()
@@ -111,6 +117,7 @@ class MainActivity : ComponentActivity() {
                 telegram = TelegramProxy.state.collectAsState().value,
                 vpn = Vpn.state.collectAsState().value,
                 toast = toast.collectAsState().value,
+                xiaomi = xiaomi,
             )
             FiolKidApp(state = state, version = BuildConfig.VERSION_NAME, onPower = { power(state.power) }, data = data, actions = actions)
         }
@@ -175,6 +182,9 @@ class MainActivity : ComponentActivity() {
             if (Vpn.state.value.let { it.hasLink to it.linkText } != before) reloadVpn()
         }
     }
+
+    private val xiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true) ||
+        Build.BRAND.lowercase() in setOf("xiaomi", "redmi", "poco")
 
     /** Подписка поменялась: если FiolKid включён, служба перезапустит sing-box, не выключая VPN. */
     private fun reloadVpn() {
